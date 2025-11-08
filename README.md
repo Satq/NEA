@@ -1,4 +1,6 @@
-# Smart Budgeting System
+# NEA - Smart Budgeting System
+
+This repository contains all code for my Computer Science NEA project.
 
 A comprehensive personal finance management tool designed for students and young adults.
 
@@ -32,7 +34,7 @@ cd NEA
 
 2. Install required packages:
 ```bash
-pip install pandas matplotlib reportlab
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -45,4 +47,3 @@ python "NEA code/budgeting_system.py"
 ## Author
 
 Sathvik Devireddy
-
