@@ -4,10 +4,11 @@
 
 import datetime
 import csv
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+# ReportLab imports - package is required (listed in requirements.txt)
+from reportlab.lib import colors  # type: ignore
+from reportlab.lib.pagesizes import letter  # type: ignore
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer  # type: ignore
+from reportlab.lib.styles import getSampleStyleSheet  # type: ignore
 
 from database import DatabaseManager
 from security import SecurityManager
