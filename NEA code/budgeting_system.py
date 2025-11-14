@@ -501,6 +501,19 @@ class BudgetingSystem:
         self.db.update_user_preferences(self.current_user_id, theme, currency, notif_enabled, language)
         return True, "Preferences updated successfully"
     
+    def verify_current_password(self, password):
+        """Verify the provided password against the current user's credentials"""
+        if not self.current_user_id:
+            return False
+        
+        query = "SELECT password_hash, salt FROM users WHERE user_id = ?"
+        result = self.db.execute_query(query, (self.current_user_id,), fetch_one=True)
+        if not result:
+            return False
+        
+        password_hash, salt = result
+        return self.security.verify_password(password, salt, password_hash)
+    
     # Backup and Restore
     def backup_data(self, backup_path):
         """Backup entire database"""

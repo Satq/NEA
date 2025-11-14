@@ -11,6 +11,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+from gui.translations import DEFAULT_LANGUAGE, LANGUAGE_MAP, translate_text
+
 
 class BudgetingApp:
     """Main Application Interface"""
@@ -20,6 +22,15 @@ class BudgetingApp:
         self.system = system
         self.root.title("Smart Budgeting System")
         self.root.geometry("1200x800")
+        prefs = self.system.get_preferences()
+        self.current_language = (
+            prefs[5] if prefs and len(prefs) > 5 and prefs[5] in LANGUAGE_MAP else DEFAULT_LANGUAGE
+        )
+        self.side_menu_visible = False
+        self.side_menu_width = 240
+        self.locked = False
+        self.lock_overlay = None
+        self.language_window = None
         
         # Store reference to db for direct access
         self.db = system.db
@@ -29,8 +40,11 @@ class BudgetingApp:
         self.session_timeout = 900  # 15 minutes
         self._monitor_session()
         
+        self._create_hamburger_menu()
         self.create_menu()
         self.create_main_interface()
+        self.apply_language_to_ui(self.current_language)
+        self.root.bind("<Configure>", self._lift_overlay_elements)
         
         # Refresh data
         self.refresh_data()
@@ -59,6 +73,280 @@ class BudgetingApp:
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About", command=self.show_about)
+    
+    def _create_hamburger_menu(self):
+        """Create hamburger trigger and slide-out menu"""
+        self.hamburger_container = tk.Frame(self.root, bg="white", width=54, height=54, highlightthickness=0)
+        self.hamburger_container.place(x=8, y=8)
+        self.hamburger_container.pack_propagate(False)
+        self.hamburger_button = tk.Button(
+            self.hamburger_container,
+            text="\u2630",
+            font=("Helvetica", 18),
+            relief="flat",
+            bg="white",
+            activebackground="#e0e0e0",
+            command=self.toggle_side_menu,
+            cursor="hand2",
+            bd=0,
+            highlightthickness=0
+        )
+        self.hamburger_button.pack(expand=True, fill="both")
+        
+        self.side_menu = tk.Frame(self.root, bg="#f5f5f5", width=self.side_menu_width)
+        self.side_menu.place(x=-self.side_menu_width, y=0, relheight=1)
+        self._populate_side_menu()
+        self.root.bind_all("<Button-1>", self._maybe_close_side_menu, add="+")
+    
+    def _populate_side_menu(self):
+        """Populate slide-out menu with action buttons"""
+        self.quick_menu_header = tk.Label(
+            self.side_menu,
+            text=self._t("quick_menu"),
+            bg="#f5f5f5",
+            fg="#111111",
+            font=("Helvetica", 16, "bold")
+        )
+        self.quick_menu_header.pack(fill="x", padx=15, pady=(20, 10))
+        
+        self.side_menu_buttons = {}
+        options = [
+            ("settings", self.open_settings_window),
+            ("themes", self.open_theme_window),
+            ("manage_account", self.open_account_manager),
+            ("language", self.open_language_window),
+            ("accessibility", self.open_accessibility_center),
+        ]
+        
+        for key, cmd in options:
+            btn = tk.Button(
+                self.side_menu,
+                text=self._t(key),
+                command=cmd,
+                anchor="w",
+                padx=20,
+                pady=8,
+                relief="flat",
+                bg="white",
+                fg="#111111",
+                activebackground="#e0e0e0",
+                activeforeground="#000000",
+                cursor="hand2"
+            )
+            btn.pack(fill="x", padx=10, pady=4)
+            self.side_menu_buttons[key] = btn
+        
+        tk.Frame(self.side_menu, bg="#d0d0d0", height=2).pack(fill="x", padx=10, pady=15)
+        
+        quick_actions = tk.Frame(self.side_menu, bg="#f5f5f5")
+        quick_actions.pack(fill="x", padx=10, pady=(0, 15))
+        
+        self.logout_btn = tk.Button(
+            quick_actions,
+            text=self._t("logout"),
+            command=self.quick_logout,
+            relief="raised",
+            bg="white",
+            fg="#111111",
+            activebackground="#e0e0e0",
+            cursor="hand2"
+        )
+        self.logout_btn.pack(fill="x", pady=(0, 8))
+        
+        self.lock_btn = tk.Button(
+            quick_actions,
+            text=self._t("lock"),
+            command=self.quick_lock,
+            relief="raised",
+            bg="white",
+            fg="#111111",
+            activebackground="#e0e0e0",
+            cursor="hand2"
+        )
+        self.lock_btn.pack(fill="x")
+    
+    def toggle_side_menu(self):
+        """Show or hide the side menu"""
+        if self.side_menu_visible:
+            self._hide_side_menu()
+            return
+        self.side_menu.place_configure(x=0)
+        self.side_menu.lift()
+        if hasattr(self, "hamburger_container"):
+            self.hamburger_container.lift()
+        self.side_menu_visible = True
+    
+    def _hide_side_menu(self):
+        """Hide side menu"""
+        self.side_menu.place_configure(x=-self.side_menu_width)
+        self.side_menu_visible = False
+    
+    def _maybe_close_side_menu(self, event):
+        """Close menu when clicking outside of it"""
+        if not self.side_menu_visible:
+            return
+        widget = event.widget
+        while widget is not None:
+            if widget == self.side_menu or widget == self.hamburger_button:
+                return
+            widget = getattr(widget, "master", None)
+        self._hide_side_menu()
+    
+    def _lift_overlay_elements(self, event=None):
+        """Keep overlay components on top during resize"""
+        if hasattr(self, "hamburger_container"):
+            self.hamburger_container.lift()
+        if self.side_menu_visible:
+            self.side_menu.lift()
+        if self.lock_overlay:
+            self.lock_overlay.lift()
+    
+    def _t(self, key):
+        """Convenience translator"""
+        return translate_text(self.current_language, key)
+    
+    def apply_language_to_ui(self, language=None):
+        """Update visible text across the interface"""
+        if language:
+            if language in LANGUAGE_MAP:
+                self.current_language = language
+            else:
+                self.current_language = DEFAULT_LANGUAGE
+        self.root.title(self._t("smart_budget_system"))
+        
+        if hasattr(self, "title_label"):
+            self.title_label.config(text=self._t("smart_budget_system"))
+        if hasattr(self, "quick_menu_header"):
+            self.quick_menu_header.config(text=self._t("quick_menu"))
+        if hasattr(self, "side_menu_buttons"):
+            for key, btn in self.side_menu_buttons.items():
+                btn.config(text=self._t(key))
+        if hasattr(self, "logout_btn"):
+            self.logout_btn.config(text=self._t("logout"))
+        if hasattr(self, "lock_btn"):
+            self.lock_btn.config(text=self._t("lock"))
+        if hasattr(self, "notebook"):
+            self.notebook.tab(self.dashboard_frame, text=self._t("dashboard_tab"))
+            self.notebook.tab(self.transactions_frame, text=self._t("transactions_tab"))
+            self.notebook.tab(self.categories_frame, text=self._t("categories_tab"))
+            self.notebook.tab(self.budgets_frame, text=self._t("budgets_tab"))
+            self.notebook.tab(self.goals_frame, text=self._t("goals_tab"))
+            self.notebook.tab(self.reports_frame, text=self._t("reports_tab"))
+        if hasattr(self, "overall_frame"):
+            self.overall_frame.config(text=self._t("overall_budget"))
+        if hasattr(self, "spending_frame"):
+            self.spending_frame.config(text=self._t("total_spending"))
+        if hasattr(self, "income_frame"):
+            self.income_frame.config(text=self._t("total_income"))
+        if hasattr(self, "recent_label"):
+            self.recent_label.config(text=self._t("recent_transactions"))
+        if hasattr(self, "actions_frame"):
+            self.actions_frame.config(text=self._t("quick_actions"))
+        if hasattr(self, "quick_action_buttons"):
+            self.quick_action_buttons["add"].config(text=self._t("add_transaction"))
+            self.quick_action_buttons["delete"].config(text=self._t("delete_transaction"))
+            self.quick_action_buttons["edit"].config(text=self._t("edit_transaction"))
+            self.quick_action_buttons["view"].config(text=self._t("view_transactions"))
+    
+    def open_settings_window(self):
+        """Open settings placeholder window"""
+        self._open_placeholder_window(
+            "Settings",
+            "Adjust system-wide preferences and integrations here. Detailed controls are coming soon."
+        )
+    
+    def open_theme_window(self):
+        """Open theme placeholder window"""
+        self._open_placeholder_window(
+            "Themes",
+            "Theme customization lets you switch colour palettes and fonts.\nTheme presets will be available shortly."
+        )
+    
+    def open_account_manager(self):
+        """Open manage account placeholder window"""
+        self._open_placeholder_window(
+            "Manage Account",
+            "Account management will include updating profile information, security questions, and recovery details."
+        )
+    
+    def open_accessibility_center(self):
+        """Open accessibility placeholder window"""
+        self._open_placeholder_window(
+            "Accessibility",
+            "Accessibility tools such as font scaling, high-contrast themes, and narration will live here."
+        )
+    
+    def _open_placeholder_window(self, title, message):
+        """Generic placeholder window for not-yet-built areas"""
+        window = tk.Toplevel(self.root)
+        window.title(title)
+        window.geometry("360x220")
+        window.transient(self.root)
+        ttk.Label(window, text=title, font=("Helvetica", 15, "bold")).pack(pady=(15, 5))
+        ttk.Label(
+            window,
+            text=message,
+            wraplength=320,
+            justify="left"
+        ).pack(pady=10, padx=20, fill="x")
+        ttk.Button(window, text="Close", command=window.destroy).pack(pady=10)
+    
+    def open_language_window(self):
+        """Allow the user to change interface language"""
+        if self.language_window and tk.Toplevel.winfo_exists(self.language_window):
+            self.language_window.lift()
+            self.language_window.focus_force()
+            return
+        
+        languages = list(LANGUAGE_MAP.keys())
+        self.language_window = tk.Toplevel(self.root)
+        self.language_window.title("Language Preferences")
+        self.language_window.geometry("360x320")
+        self.language_window.transient(self.root)
+        
+        lang_var = tk.StringVar(value=self.current_language)
+        
+        ttk.Label(self.language_window, text="Choose Display Language", font=("Helvetica", 15, "bold")).pack(pady=15)
+        radio_frame = ttk.Frame(self.language_window, padding=10)
+        radio_frame.pack(fill="both", expand=True)
+        
+        for lang in languages:
+            ttk.Radiobutton(radio_frame, text=lang, value=lang, variable=lang_var).pack(anchor="w", pady=5)
+        
+        status_label = ttk.Label(self.language_window, text="", foreground="green")
+        status_label.pack(pady=(0, 5))
+        
+        def apply_language():
+            selected = lang_var.get()
+            current = self.system.get_preferences()
+            if not current:
+                current = (0, 0, 'light', '£', 1, DEFAULT_LANGUAGE)
+            success, message = self.system.update_preferences(
+                current[2],
+                current[3],
+                bool(current[4]),
+                selected
+            )
+            if success:
+                status_label.config(text=f"Language updated to {selected}", foreground="green")
+                self.apply_language_to_ui(selected)
+            else:
+                status_label.config(text=message, foreground="red")
+        
+        buttons = ttk.Frame(self.language_window)
+        buttons.pack(pady=10)
+        ttk.Button(buttons, text="Apply", command=apply_language).grid(row=0, column=0, padx=5)
+        ttk.Button(buttons, text="Close", command=self._close_language_window).grid(row=0, column=1, padx=5)
+        
+        def handle_close():
+            self._close_language_window()
+        self.language_window.protocol("WM_DELETE_WINDOW", handle_close)
+    
+    def _close_language_window(self):
+        """Destroy the language selector window"""
+        if self.language_window and tk.Toplevel.winfo_exists(self.language_window):
+            self.language_window.destroy()
+        self.language_window = None
     
     def create_main_interface(self):
         """Create main dashboard interface"""
@@ -105,13 +393,13 @@ class BudgetingApp:
         # Title area mimicking the sketch header
         title_frame = ttk.Frame(self.dashboard_frame, padding=(5, 10))
         title_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
-        title_label = tk.Label(
+        self.title_label = tk.Label(
             title_frame,
-            text="Smart Budget System",
+            text=self._t("smart_budget_system"),
             font=("Segoe Script", 26, "bold"),
             anchor="w"
         )
-        title_label.pack(side="left", fill="x", expand=True)
+        self.title_label.pack(side="left", fill="x", expand=True)
         ttk.Separator(self.dashboard_frame, orient="horizontal").grid(
             row=0, column=0, columnspan=2, sticky="ew", pady=(55, 0)
         )
@@ -121,13 +409,13 @@ class BudgetingApp:
         left_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 15))
         left_frame.columnconfigure(0, weight=1)
         
-        overall_frame = ttk.LabelFrame(left_frame, text="Current Overall Budget", padding=10)
-        overall_frame.grid(row=0, column=0, sticky="ew")
+        self.overall_frame = ttk.LabelFrame(left_frame, text=self._t("overall_budget"), padding=10)
+        self.overall_frame.grid(row=0, column=0, sticky="ew")
         self.overall_fig, self.overall_ax = plt.subplots(figsize=(4.5, 4.0))
-        self.overall_canvas = FigureCanvasTkAgg(self.overall_fig, master=overall_frame)
+        self.overall_canvas = FigureCanvasTkAgg(self.overall_fig, master=self.overall_frame)
         self.overall_canvas.get_tk_widget().pack(fill="both", expand=True)
         self.overall_summary = ttk.Label(
-            overall_frame,
+            self.overall_frame,
             text="Income £0.00 | Spending £0.00 | Balance £0.00",
             font=("Helvetica", 11, "bold")
         )
@@ -138,16 +426,16 @@ class BudgetingApp:
         pies_frame.columnconfigure(0, weight=1)
         pies_frame.columnconfigure(1, weight=1)
         
-        spending_frame = ttk.LabelFrame(pies_frame, text="Total Spending", padding=5)
-        spending_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.spending_frame = ttk.LabelFrame(pies_frame, text=self._t("total_spending"), padding=5)
+        self.spending_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         self.spending_fig, self.spending_ax = plt.subplots(figsize=(4.5, 4.0))
-        self.spending_canvas = FigureCanvasTkAgg(self.spending_fig, master=spending_frame)
+        self.spending_canvas = FigureCanvasTkAgg(self.spending_fig, master=self.spending_frame)
         self.spending_canvas.get_tk_widget().pack(fill="both", expand=True)
         
-        income_frame = ttk.LabelFrame(pies_frame, text="Total Income", padding=5)
-        income_frame.grid(row=0, column=1, sticky="nsew")
+        self.income_frame = ttk.LabelFrame(pies_frame, text=self._t("total_income"), padding=5)
+        self.income_frame.grid(row=0, column=1, sticky="nsew")
         self.income_fig, self.income_ax = plt.subplots(figsize=(4.5, 4.0))
-        self.income_canvas = FigureCanvasTkAgg(self.income_fig, master=income_frame)
+        self.income_canvas = FigureCanvasTkAgg(self.income_fig, master=self.income_frame)
         self.income_canvas.get_tk_widget().pack(fill="both", expand=True)
         
         # Right panel holds recent transactions & quick actions
@@ -155,8 +443,8 @@ class BudgetingApp:
         right_panel.grid(row=1, column=1, sticky="ns")
         right_panel.rowconfigure(1, weight=1)
         
-        recent_label = ttk.Label(right_panel, text="Recent Transactions", font=("Helvetica", 14, "bold"))
-        recent_label.grid(row=0, column=0, sticky="nw", pady=(0, 10))
+        self.recent_label = ttk.Label(right_panel, text=self._t("recent_transactions"), font=("Helvetica", 14, "bold"))
+        self.recent_label.grid(row=0, column=0, sticky="nw", pady=(0, 10))
         
         self.recent_container = ttk.Frame(right_panel)
         self.recent_container.grid(row=1, column=0, sticky="nsew")
@@ -172,15 +460,39 @@ class BudgetingApp:
             arrow.pack(side="right")
             self.recent_rows.append({"desc": desc, "arrow": arrow})
         
-        actions_frame = ttk.LabelFrame(right_panel, text="Quick Actions", padding=10)
-        actions_frame.grid(row=2, column=0, sticky="ew", pady=(15, 0))
+        self.actions_frame = ttk.LabelFrame(right_panel, text=self._t("quick_actions"), padding=10)
+        self.actions_frame.grid(row=2, column=0, sticky="ew", pady=(15, 0))
         for i in range(2):
-            actions_frame.columnconfigure(i, weight=1)
+            self.actions_frame.columnconfigure(i, weight=1)
         
-        ttk.Button(actions_frame, text="Add New Transaction", command=lambda: self.navigate_transactions("add")).grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-        ttk.Button(actions_frame, text="Delete Transaction", command=lambda: self.navigate_transactions("delete")).grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-        ttk.Button(actions_frame, text="Edit Transaction", command=lambda: self.navigate_transactions("edit")).grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-        ttk.Button(actions_frame, text="View All Transactions", command=lambda: self.navigate_transactions("view")).grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+        self.quick_action_buttons = {}
+        self.quick_action_buttons["add"] = ttk.Button(
+            self.actions_frame,
+            text=self._t("add_transaction"),
+            command=lambda: self.navigate_transactions("add")
+        )
+        self.quick_action_buttons["add"].grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        
+        self.quick_action_buttons["delete"] = ttk.Button(
+            self.actions_frame,
+            text=self._t("delete_transaction"),
+            command=lambda: self.navigate_transactions("delete")
+        )
+        self.quick_action_buttons["delete"].grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        
+        self.quick_action_buttons["edit"] = ttk.Button(
+            self.actions_frame,
+            text=self._t("edit_transaction"),
+            command=lambda: self.navigate_transactions("edit")
+        )
+        self.quick_action_buttons["edit"].grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        
+        self.quick_action_buttons["view"] = ttk.Button(
+            self.actions_frame,
+            text=self._t("view_transactions"),
+            command=lambda: self.navigate_transactions("view")
+        )
+        self.quick_action_buttons["view"].grid(row=1, column=1, sticky="ew", padx=5, pady=5)
     
     def navigate_transactions(self, action):
         """Jump to the transactions tab focused on the requested action"""
@@ -1127,7 +1439,8 @@ class BudgetingApp:
         
         prefs = self.system.get_preferences()
         if not prefs:
-            prefs = (0, 0, 'light', '£', 1, 'English')
+            prefs = (0, 0, 'light', '£', 1, DEFAULT_LANGUAGE)
+        language_options = list(LANGUAGE_MAP.keys())
         
         ttk.Label(dialog, text="User Preferences", font=("Helvetica", 14, "bold")).pack(pady=10)
         
@@ -1156,8 +1469,13 @@ class BudgetingApp:
         # Language
         ttk.Label(form_frame, text="Language:").grid(row=3, column=0, sticky="w", pady=5)
         lang_var = tk.StringVar(value=prefs[5])
-        lang_combo = ttk.Combobox(form_frame, values=["English", "Spanish", "French", "Japanese"], 
-                                   textvariable=lang_var, width=25, state="readonly")
+        lang_combo = ttk.Combobox(
+            form_frame,
+            values=language_options,
+            textvariable=lang_var,
+            width=25,
+            state="readonly"
+        )
         lang_combo.grid(row=3, column=1, pady=5)
         
         status_label = ttk.Label(form_frame, text="", foreground="red")
@@ -1173,11 +1491,75 @@ class BudgetingApp:
             
             if success:
                 messagebox.showinfo("Success", message)
+                self.apply_language_to_ui(language)
                 dialog.destroy()
             else:
                 status_label.config(text=message)
         
         ttk.Button(form_frame, text="Save Preferences", command=save).grid(row=5, column=0, columnspan=2, pady=10)
+    
+    def quick_lock(self):
+        """Overlay lock screen that blocks interaction until password is re-entered"""
+        if self.locked:
+            return
+        self._hide_side_menu()
+        self.locked = True
+        self.lock_overlay = tk.Frame(self.root, bg="#0f0f0f")
+        self.lock_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.lock_overlay.lift()
+        
+        container = tk.Frame(self.lock_overlay, bg="#1f1f1f", padx=25, pady=25)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(
+            container,
+            text="Session Locked",
+            font=("Helvetica", 18, "bold"),
+            bg="#1f1f1f",
+            fg="white"
+        ).pack(pady=(0, 10))
+        tk.Label(
+            container,
+            text="Enter your password to resume editing.",
+            bg="#1f1f1f",
+            fg="#dddddd"
+        ).pack()
+        
+        password_var = tk.StringVar()
+        entry = ttk.Entry(container, textvariable=password_var, show="*")
+        entry.pack(pady=12, fill="x")
+        status_label = tk.Label(container, text="", bg="#1f1f1f", fg="#ff6b6b")
+        status_label.pack()
+        
+        def attempt_unlock():
+            password = password_var.get()
+            if not password:
+                status_label.config(text="Please enter your password.")
+                return
+            if self._verify_unlock_password(password):
+                self.unlock_interface()
+                password_var.set("")
+                status_label.config(text="")
+            else:
+                status_label.config(text="Incorrect password.")
+        
+        ttk.Button(container, text="Unlock", command=attempt_unlock).pack(pady=(15, 0), fill="x")
+        entry.focus_set()
+        entry.bind("<Return>", lambda event: attempt_unlock())
+    
+    def unlock_interface(self):
+        """Remove lock overlay"""
+        if not self.locked:
+            return
+        self.locked = False
+        if self.lock_overlay:
+            self.lock_overlay.destroy()
+            self.lock_overlay = None
+        if hasattr(self, "hamburger_container"):
+            self.hamburger_container.lift()
+    
+    def _verify_unlock_password(self, password):
+        """Validate password before unlocking"""
+        return self.system.verify_current_password(password)
     
     def backup_data(self):
         """Backup database"""
@@ -1221,16 +1603,25 @@ class BudgetingApp:
     def logout(self):
         """Logout user"""
         if messagebox.askyesno("Confirm Logout", "Are you sure you want to logout?"):
-            self.system.logout()
-            self.root.destroy()
-            
-            # Return to login screen - import here to avoid circular import
-            from budgeting_system import BudgetingSystem
-            from gui.login_window import LoginWindow
-            
-            root = tk.Tk()
-            login = LoginWindow(root, BudgetingSystem())
-            root.mainloop()
+            self._perform_logout()
+    
+    def quick_logout(self):
+        """Logout immediately from the side menu"""
+        self._hide_side_menu()
+        self._perform_logout()
+    
+    def _perform_logout(self):
+        """Tear down current session and show login screen"""
+        self.system.logout()
+        self.root.destroy()
+        
+        # Return to login screen - import here to avoid circular import
+        from budgeting_system import BudgetingSystem
+        from gui.login_window import LoginWindow
+        
+        root = tk.Tk()
+        login = LoginWindow(root, BudgetingSystem())
+        root.mainloop()
     
     def _monitor_session(self):
         """Monitor session timeout"""
