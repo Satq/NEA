@@ -97,64 +97,99 @@ class BudgetingApp:
         self.create_reports_tab()
     
     def create_dashboard(self):
-        """Create dashboard with overview"""
-        # Header
-        header = ttk.Label(self.dashboard_frame, text="Financial Dashboard", font=("Helvetica", 16, "bold"))
-        header.pack(pady=10)
+        """Create dashboard styled like the provided hand-drawn concept"""
+        self.dashboard_frame.columnconfigure(0, weight=3)
+        self.dashboard_frame.columnconfigure(1, weight=1)
+        self.dashboard_frame.rowconfigure(1, weight=1)
         
-        # Summary cards frame
-        summary_frame = ttk.Frame(self.dashboard_frame)
-        summary_frame.pack(fill="x", pady=10)
+        # Title area mimicking the sketch header
+        title_frame = ttk.Frame(self.dashboard_frame, padding=(5, 10))
+        title_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+        title_label = tk.Label(
+            title_frame,
+            text="Smart Budget System",
+            font=("Segoe Script", 26, "bold"),
+            anchor="w"
+        )
+        title_label.pack(side="left", fill="x", expand=True)
+        ttk.Separator(self.dashboard_frame, orient="horizontal").grid(
+            row=0, column=0, columnspan=2, sticky="ew", pady=(55, 0)
+        )
         
-        # Create summary cards
-        self.income_card = self.create_summary_card(summary_frame, "Total Income", "£0.00", 0, 0)
-        self.expense_card = self.create_summary_card(summary_frame, "Total Expenses", "£0.00", 0, 1)
-        self.savings_card = self.create_summary_card(summary_frame, "Net Savings", "£0.00", 0, 2)
+        # Left side holds donut + two pies
+        left_frame = ttk.Frame(self.dashboard_frame, padding=10)
+        left_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 15))
+        left_frame.columnconfigure(0, weight=1)
         
-        # Charts frame
-        charts_frame = ttk.Frame(self.dashboard_frame)
-        charts_frame.pack(fill="both", expand=True, pady=10)
+        overall_frame = ttk.LabelFrame(left_frame, text="Current Overall Budget", padding=10)
+        overall_frame.grid(row=0, column=0, sticky="ew")
+        self.overall_fig, self.overall_ax = plt.subplots(figsize=(4.5, 4.0))
+        self.overall_canvas = FigureCanvasTkAgg(self.overall_fig, master=overall_frame)
+        self.overall_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.overall_summary = ttk.Label(
+            overall_frame,
+            text="Income £0.00 | Spending £0.00 | Balance £0.00",
+            font=("Helvetica", 11, "bold")
+        )
+        self.overall_summary.pack(pady=(8, 0))
         
-        # Pie chart for category breakdown
-        self.pie_fig, self.pie_ax = plt.subplots(figsize=(5, 4))
-        self.pie_canvas = FigureCanvasTkAgg(self.pie_fig, master=charts_frame)
-        self.pie_canvas.get_tk_widget().pack(side="left", fill="both", expand=True, padx=5)
+        pies_frame = ttk.Frame(left_frame)
+        pies_frame.grid(row=1, column=0, sticky="nsew", pady=15)
+        pies_frame.columnconfigure(0, weight=1)
+        pies_frame.columnconfigure(1, weight=1)
         
-        # Bar chart for monthly trends
-        self.bar_fig, self.bar_ax = plt.subplots(figsize=(5, 4))
-        self.bar_canvas = FigureCanvasTkAgg(self.bar_fig, master=charts_frame)
-        self.bar_canvas.get_tk_widget().pack(side="left", fill="both", expand=True, padx=5)
+        spending_frame = ttk.LabelFrame(pies_frame, text="Total Spending", padding=5)
+        spending_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.spending_fig, self.spending_ax = plt.subplots(figsize=(4.5, 4.0))
+        self.spending_canvas = FigureCanvasTkAgg(self.spending_fig, master=spending_frame)
+        self.spending_canvas.get_tk_widget().pack(fill="both", expand=True)
         
-        # Goals progress
-        goals_frame = ttk.LabelFrame(self.dashboard_frame, text="Goals Progress", padding=10)
-        goals_frame.pack(fill="x", pady=10)
+        income_frame = ttk.LabelFrame(pies_frame, text="Total Income", padding=5)
+        income_frame.grid(row=0, column=1, sticky="nsew")
+        self.income_fig, self.income_ax = plt.subplots(figsize=(4.5, 4.0))
+        self.income_canvas = FigureCanvasTkAgg(self.income_fig, master=income_frame)
+        self.income_canvas.get_tk_widget().pack(fill="both", expand=True)
         
-        self.goals_tree = ttk.Treeview(goals_frame, columns=('Goal', 'Progress', 'Amount'), height=5)
-        self.goals_tree.pack(fill="x")
-        self.goals_tree.heading('Goal', text='Goal')
-        self.goals_tree.heading('Progress', text='Progress %')
-        self.goals_tree.heading('Amount', text='Current/ Target')
+        # Right panel holds recent transactions & quick actions
+        right_panel = ttk.Frame(self.dashboard_frame, padding=10)
+        right_panel.grid(row=1, column=1, sticky="ns")
+        right_panel.rowconfigure(1, weight=1)
         
-        # Recent transactions
-        recent_frame = ttk.LabelFrame(self.dashboard_frame, text="Recent Transactions", padding=10)
-        recent_frame.pack(fill="both", expand=True, pady=10)
+        recent_label = ttk.Label(right_panel, text="Recent Transactions", font=("Helvetica", 14, "bold"))
+        recent_label.grid(row=0, column=0, sticky="nw", pady=(0, 10))
         
-        self.recent_tree = ttk.Treeview(recent_frame, columns=('Date', 'Description', 'Category', 'Amount'), height=8)
-        self.recent_tree.pack(fill="both", expand=True)
-        self.recent_tree.heading('Date', text='Date')
-        self.recent_tree.heading('Description', text='Description')
-        self.recent_tree.heading('Category', text='Category')
-        self.recent_tree.heading('Amount', text='Amount')
+        self.recent_container = ttk.Frame(right_panel)
+        self.recent_container.grid(row=1, column=0, sticky="nsew")
+        self.recent_rows = []
+        for _ in range(7):
+            row = ttk.Frame(self.recent_container)
+            row.pack(fill="x", pady=4)
+            bullet = ttk.Label(row, text="•", font=("Helvetica", 14, "bold"))
+            bullet.pack(side="left")
+            desc = tk.Label(row, text="No recent activity", anchor="w", font=("Helvetica", 11))
+            desc.pack(side="left", fill="x", expand=True, padx=4)
+            arrow = tk.Label(row, text="↑", font=("Helvetica", 12, "bold"), fg="#2e8b57")
+            arrow.pack(side="right")
+            self.recent_rows.append({"desc": desc, "arrow": arrow})
+        
+        actions_frame = ttk.LabelFrame(right_panel, text="Quick Actions", padding=10)
+        actions_frame.grid(row=2, column=0, sticky="ew", pady=(15, 0))
+        for i in range(2):
+            actions_frame.columnconfigure(i, weight=1)
+        
+        ttk.Button(actions_frame, text="Add New Transaction", command=lambda: self.navigate_transactions("add")).grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        ttk.Button(actions_frame, text="Delete Transaction", command=lambda: self.navigate_transactions("delete")).grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        ttk.Button(actions_frame, text="Edit Transaction", command=lambda: self.navigate_transactions("edit")).grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        ttk.Button(actions_frame, text="View All Transactions", command=lambda: self.navigate_transactions("view")).grid(row=1, column=1, sticky="ew", padx=5, pady=5)
     
-    def create_summary_card(self, parent, title, value, row, col):
-        """Create a summary card widget"""
-        card = ttk.LabelFrame(parent, text=title, padding=10)
-        card.grid(row=row, column=col, padx=10, pady=5, sticky="nsew")
-        
-        value_label = ttk.Label(card, text=value, font=("Helvetica", 14, "bold"))
-        value_label.pack()
-        
-        return value_label
+    def navigate_transactions(self, action):
+        """Jump to the transactions tab focused on the requested action"""
+        if hasattr(self, "notebook"):
+            self.notebook.select(self.transactions_frame)
+        if action == "add" and hasattr(self, "trans_desc_entry"):
+            self.trans_desc_entry.focus_set()
+        elif hasattr(self, "transactions_tree"):
+            self.transactions_tree.focus_set()
     
     def create_transactions_tab(self):
         """Create transactions management interface"""
@@ -452,61 +487,89 @@ class BudgetingApp:
         income = sum(t[5] for t in transactions if t[6] == 'income')
         expenses = sum(t[5] for t in transactions if t[6] == 'expense')
         savings = income - expenses
+        self.overall_summary.config(text=f"Income £{income:.2f} | Spending £{expenses:.2f} | Balance £{savings:.2f}")
         
-        # Update cards
-        self.income_card.config(text=f"£{income:.2f}")
-        self.expense_card.config(text=f"£{expenses:.2f}")
-        self.savings_card.config(text=f"£{savings:.2f}")
+        # Overall donut chart using budgets or fallback to income/expense split
+        budgets = self.system.get_budgets()
+        budget_totals = {}
+        for budget in budgets:
+            cat_name = self.get_category_name(budget[2])
+            budget_totals[cat_name] = budget_totals.get(cat_name, 0) + budget[3]
         
-        # Update pie chart
-        self.pie_ax.clear()
-        category_totals = {}
+        if not budget_totals and (income or expenses):
+            budget_totals = {"Income": max(income, 0), "Expenses": max(expenses, 0)}
+        
+        self.overall_ax.clear()
+        if budget_totals:
+            labels = list(budget_totals.keys())
+            values = list(budget_totals.values())
+            colors = plt.cm.Pastel1(range(len(labels)))
+            self.overall_ax.pie(
+                values,
+                labels=labels,
+                startangle=90,
+                colors=colors,
+                wedgeprops={"width": 0.35, "edgecolor": "white"}
+            )
+            self.overall_ax.text(0, 0, f"£{savings:.2f}\nBalance", ha="center", va="center", fontsize=12, weight="bold")
+            self.overall_ax.set_aspect('equal')
+        else:
+            self.overall_ax.axis('off')
+            self.overall_ax.text(0.5, 0.5, "Add budgets to\nbuild your donut", ha="center", va="center", transform=self.overall_ax.transAxes)
+        self.overall_canvas.draw()
+        
+        # Spending pie
+        self.spending_ax.clear()
+        spending_totals = {}
+        income_totals = {}
         for t in transactions:
-            if t[6] == 'expense':
-                cat_name = self.get_category_name(t[2])
-                category_totals[cat_name] = category_totals.get(cat_name, 0) + t[5]
-        
-        if category_totals:
-            labels = list(category_totals.keys())
-            values = list(category_totals.values())
-            self.pie_ax.pie(values, labels=labels, autopct='%1.1f%%')
-            self.pie_ax.set_title("Expense Breakdown")
-        self.pie_canvas.draw()
-        
-        # Update bar chart (mock trend data)
-        self.bar_ax.clear()
-        months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']
-        income_trend = [income * 0.9, income * 0.95, income, income * 1.05, income * 1.1, income]
-        expense_trend = [expenses * 0.9, expenses * 0.95, expenses, expenses * 1.05, expenses * 1.1, expenses]
-        
-        x = range(len(months))
-        self.bar_ax.bar(x, income_trend, width=0.4, label='Income', alpha=0.8)
-        self.bar_ax.bar([i + 0.4 for i in x], expense_trend, width=0.4, label='Expenses', alpha=0.8)
-        self.bar_ax.set_xlabel('Month')
-        self.bar_ax.set_ylabel('Amount (£)')
-        self.bar_ax.set_title('Income vs Expenses Trend')
-        self.bar_ax.set_xticks([i + 0.2 for i in x])
-        self.bar_ax.set_xticklabels(months)
-        self.bar_ax.legend()
-        self.bar_canvas.draw()
-        
-        # Update goals
-        for child in self.goals_tree.get_children():
-            self.goals_tree.delete(child)
-        
-        goals = self.system.get_goals()
-        for goal in goals:
-            progress = f"{goal[8]:.1f}%"
-            amount = f"£{goal[7]:.2f} / £{goal[5]:.2f}"
-            self.goals_tree.insert('', 'end', values=(goal[3], progress, amount))
-        
-        # Update recent transactions
-        for child in self.recent_tree.get_children():
-            self.recent_tree.delete(child)
-        
-        for t in transactions[:5]:  # Show last 5
             cat_name = self.get_category_name(t[2])
-            self.recent_tree.insert('', 'end', values=(t[3], t[4], cat_name, f"£{t[5]:.2f}"))
+            if t[6] == 'expense':
+                spending_totals[cat_name] = spending_totals.get(cat_name, 0) + t[5]
+            else:
+                income_totals[cat_name] = income_totals.get(cat_name, 0) + t[5]
+        
+        if spending_totals:
+            labels = list(spending_totals.keys())
+            values = list(spending_totals.values())
+            self.spending_ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
+            self.spending_ax.set_title("Spending Breakdown")
+        else:
+            self.spending_ax.axis('off')
+            self.spending_ax.text(0.5, 0.5, "No expense data yet", ha="center", va="center", transform=self.spending_ax.transAxes)
+        self.spending_canvas.draw()
+        
+        # Income pie
+        self.income_ax.clear()
+        if income_totals:
+            labels = list(income_totals.keys())
+            values = list(income_totals.values())
+            self.income_ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
+            self.income_ax.set_title("Income Sources")
+        else:
+            self.income_ax.axis('off')
+            self.income_ax.text(0.5, 0.5, "No income data yet", ha="center", va="center", transform=self.income_ax.transAxes)
+        self.income_canvas.draw()
+        
+        # Update recent transactions view
+        sorted_transactions = sorted(transactions, key=lambda t: t[3] or "", reverse=True)
+        for idx, row in enumerate(self.recent_rows):
+            if idx < len(sorted_transactions):
+                trans = sorted_transactions[idx]
+                cat_name = self.get_category_name(trans[2])
+                try:
+                    date_display = datetime.datetime.strptime(trans[3], "%Y-%m-%d").strftime("%d %b")
+                except ValueError:
+                    date_display = trans[3]
+                desc_text = f"{date_display} • {trans[4]} ({cat_name})"
+                row["desc"].config(text=desc_text)
+                if trans[6] == 'income':
+                    row["arrow"].config(text="↑", fg="#2e8b57")
+                else:
+                    row["arrow"].config(text="↓", fg="#c0392b")
+            else:
+                row["desc"].config(text="No recent activity")
+                row["arrow"].config(text="-", fg="#555555")
     
     def refresh_transactions(self):
         """Refresh transactions list"""
@@ -1186,4 +1249,3 @@ class BudgetingApp:
         """Handle session expiration"""
         messagebox.showwarning("Session Expired", "Your session has expired due to inactivity. Please login again.")
         self.logout()
-
