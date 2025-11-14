@@ -201,6 +201,24 @@ class BudgetingApp:
         if self.lock_overlay:
             self.lock_overlay.lift()
     
+    def _show_tree_context_menu(self, event, tree, menu):
+        """Utility to show context menus on right-click for treeviews"""
+        row = tree.identify_row(event.y)
+        if row:
+            tree.selection_set(row)
+            menu.tk_popup(event.x_root, event.y_root)
+            menu.grab_release()
+    
+    def _is_valid_category_parent(self, category_id, parent_id):
+        """Check if the new parent selection would create a loop"""
+        current = parent_id
+        while current:
+            if current == category_id:
+                return False
+            parent = self.system.db.get_category_by_id(current)
+            current = parent[1] if parent else None
+        return True
+    
     def _t(self, key):
         """Convenience translator"""
         return translate_text(self.current_language, key)
@@ -643,8 +661,15 @@ class BudgetingApp:
         self.categories_tree.column('Type', width=100, anchor='center')
         self.categories_tree.column('Parent', width=150)
         
-        # Bind double-click
+        # Bind interactions
         self.categories_tree.bind("<Double-1>", self.edit_category)
+        self.categories_menu = tk.Menu(self.categories_tree, tearoff=0)
+        self.categories_menu.add_command(label="Edit Category", command=self.edit_category)
+        self.categories_menu.add_command(label="Delete Category", command=self.delete_category)
+        self.categories_tree.bind(
+            "<Button-3>",
+            lambda event: self._show_tree_context_menu(event, self.categories_tree, self.categories_menu)
+        )
     
     def create_budgets_tab(self):
         """Create budgets management interface"""
@@ -691,6 +716,15 @@ class BudgetingApp:
         self.budgets_tree.column('Spent', width=100, anchor='e')
         self.budgets_tree.column('Remaining', width=100, anchor='e')
         self.budgets_tree.column('Progress', width=80, anchor='center')
+        
+        self.budgets_tree.bind("<Double-1>", self.edit_budget)
+        self.budgets_menu = tk.Menu(self.budgets_tree, tearoff=0)
+        self.budgets_menu.add_command(label="Edit Budget", command=self.edit_budget)
+        self.budgets_menu.add_command(label="Delete Budget", command=self.delete_budget)
+        self.budgets_tree.bind(
+            "<Button-3>",
+            lambda event: self._show_tree_context_menu(event, self.budgets_tree, self.budgets_menu)
+        )
     
     def create_goals_tab(self):
         """Create goals management interface"""
@@ -1095,7 +1129,11 @@ class BudgetingApp:
     
     def show_context_menu(self, event):
         """Show right-click context menu"""
-        self.context_menu.post(event.x_root, event.y_root)
+        row = self.transactions_tree.identify_row(event.y)
+        if row:
+            self.transactions_tree.selection_set(row)
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+            self.context_menu.grab_release()
     
     def apply_transaction_filters(self, event=None):
         """Apply filters to transactions"""
@@ -1246,8 +1284,91 @@ class BudgetingApp:
             messagebox.showerror("Error", message)
     
     def edit_category(self, event=None):
-        """Edit category - placeholder for future implementation"""
-        messagebox.showinfo("Info", "Edit category feature coming soon")
+        """Edit selected category"""
+        selection = self.categories_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a category to edit")
+            return
+        
+        item = self.categories_tree.item(selection[0])
+        category_id = item['values'][0]
+        category = self.system.db.get_category_by_id(category_id)
+        if not category:
+            messagebox.showerror("Error", "Category not found")
+            return
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Category")
+        dialog.geometry("360x260")
+        dialog.transient(self.root)
+        
+        ttk.Label(dialog, text="Edit Category", font=("Helvetica", 14, "bold")).pack(pady=10)
+        
+        form = ttk.Frame(dialog, padding=10)
+        form.pack(fill="both", expand=True)
+        
+        ttk.Label(form, text="Name:").grid(row=0, column=0, sticky="w", pady=5)
+        name_var = tk.StringVar(value=category[2])
+        name_entry = ttk.Entry(form, textvariable=name_var, width=30)
+        name_entry.grid(row=0, column=1, pady=5)
+        
+        ttk.Label(form, text="Type:").grid(row=1, column=0, sticky="w", pady=5)
+        type_var = tk.StringVar(value=category[3])
+        type_combo = ttk.Combobox(form, values=["income", "expense"], textvariable=type_var, state="readonly", width=27)
+        type_combo.grid(row=1, column=1, pady=5)
+        
+        ttk.Label(form, text="Parent Category:").grid(row=2, column=0, sticky="w", pady=5)
+        categories = self.system.get_categories()
+        parent_options = ["None"] + [c[2] for c in categories if c[0] != category_id]
+        current_parent = self.get_category_name(category[1]) if category[1] else "None"
+        parent_var = tk.StringVar(value=current_parent)
+        parent_combo = ttk.Combobox(form, values=parent_options, textvariable=parent_var, state="readonly", width=27)
+        parent_combo.grid(row=2, column=1, pady=5)
+        
+        status_label = ttk.Label(form, text="", foreground="red")
+        status_label.grid(row=3, column=0, columnspan=2, pady=5)
+        
+        def save_changes():
+            name = name_var.get().strip()
+            category_type = type_var.get()
+            parent_name = parent_var.get()
+            
+            parent_id = None
+            if parent_name != "None":
+                parent = self.system.db.get_category_by_name(parent_name)
+                parent_id = parent[0] if parent else None
+            
+            if parent_id and not self._is_valid_category_parent(category_id, parent_id):
+                status_label.config(text="Invalid parent selection.")
+                return
+            
+            success, message = self.system.update_category(category_id, name, category_type, parent_id)
+            if success:
+                messagebox.showinfo("Success", message)
+                dialog.destroy()
+                self.refresh_data()
+            else:
+                status_label.config(text=message)
+        
+        ttk.Button(form, text="Save Changes", command=save_changes).grid(row=4, column=0, columnspan=2, pady=10)
+    
+    def delete_category(self):
+        """Delete selected category"""
+        selection = self.categories_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a category to delete")
+            return
+        
+        item = self.categories_tree.item(selection[0])
+        category_id = item['values'][0]
+        
+        if messagebox.askyesno("Confirm Delete", "Deleting this category will remove it permanently. Continue?"):
+            success, message = self.system.delete_category(category_id)
+            if success:
+                messagebox.showinfo("Success", message)
+                self.refresh_data()
+            else:
+                messagebox.showerror("Error", message)
     
     def add_budget(self):
         """Add new budget"""
@@ -1276,6 +1397,96 @@ class BudgetingApp:
             self.refresh_data()
         else:
             messagebox.showerror("Error", message)
+    
+    def edit_budget(self, event=None):
+        """Edit selected budget"""
+        selection = self.budgets_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a budget to edit")
+            return
+        
+        item = self.budgets_tree.item(selection[0])
+        budget_id = item['values'][0]
+        budget = self.system.db.get_budget_by_id(budget_id)
+        if not budget:
+            messagebox.showerror("Error", "Budget not found")
+            return
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Budget")
+        dialog.geometry("360x320")
+        dialog.transient(self.root)
+        
+        ttk.Label(dialog, text="Edit Budget", font=("Helvetica", 14, "bold")).pack(pady=10)
+        form = ttk.Frame(dialog, padding=10)
+        form.pack(fill="both", expand=True)
+        
+        ttk.Label(form, text="Category:").grid(row=0, column=0, sticky="w", pady=5)
+        categories = self.system.get_categories()
+        category_names = [c[2] for c in categories]
+        category_var = tk.StringVar(value=self.get_category_name(budget[2]))
+        category_combo = ttk.Combobox(form, values=category_names, textvariable=category_var, state="readonly", width=27)
+        category_combo.grid(row=0, column=1, pady=5)
+        
+        ttk.Label(form, text="Limit Amount:").grid(row=1, column=0, sticky="w", pady=5)
+        limit_var = tk.StringVar(value=str(budget[3]))
+        limit_entry = ttk.Entry(form, textvariable=limit_var, width=20)
+        limit_entry.grid(row=1, column=1, pady=5)
+        
+        ttk.Label(form, text="Start Date:").grid(row=2, column=0, sticky="w", pady=5)
+        start_var = tk.StringVar(value=budget[4])
+        start_entry = ttk.Entry(form, textvariable=start_var, width=20)
+        start_entry.grid(row=2, column=1, pady=5)
+        
+        ttk.Label(form, text="End Date:").grid(row=3, column=0, sticky="w", pady=5)
+        end_var = tk.StringVar(value=budget[5])
+        end_entry = ttk.Entry(form, textvariable=end_var, width=20)
+        end_entry.grid(row=3, column=1, pady=5)
+        
+        status_label = ttk.Label(form, text="", foreground="red")
+        status_label.grid(row=4, column=0, columnspan=2, pady=5)
+        
+        def save_budget():
+            category_name = category_var.get()
+            category = self.system.db.get_category_by_name(category_name)
+            if not category:
+                status_label.config(text="Invalid category selected.")
+                return
+            
+            success, message = self.system.update_budget(
+                budget_id,
+                category[0],
+                limit_var.get(),
+                start_var.get(),
+                end_var.get()
+            )
+            
+            if success:
+                messagebox.showinfo("Success", message)
+                dialog.destroy()
+                self.refresh_data()
+            else:
+                status_label.config(text=message)
+        
+        ttk.Button(form, text="Save Changes", command=save_budget).grid(row=5, column=0, columnspan=2, pady=10)
+    
+    def delete_budget(self):
+        """Delete selected budget"""
+        selection = self.budgets_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a budget to delete")
+            return
+        
+        item = self.budgets_tree.item(selection[0])
+        budget_id = item['values'][0]
+        
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this budget?"):
+            success, message = self.system.delete_budget(budget_id)
+            if success:
+                messagebox.showinfo("Success", message)
+                self.refresh_data()
+            else:
+                messagebox.showerror("Error", message)
     
     def add_goal(self):
         """Add new goal"""

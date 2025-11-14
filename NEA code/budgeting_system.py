@@ -124,6 +124,34 @@ class BudgetingSystem:
         category_id = self.db.create_category(name, category_type, parent_id)
         return True, f"Category '{name}' created successfully"
     
+    def update_category(self, category_id, name, category_type, parent_id=None):
+        """Update existing category"""
+        category = self.db.get_category_by_id(category_id)
+        if not category:
+            return False, "Category not found"
+        
+        if not name or category_type not in ('income', 'expense'):
+            return False, "Invalid category details"
+        
+        if parent_id == category_id:
+            return False, "Category cannot be its own parent"
+        
+        # Validate parent exists and avoid circular hierarchy
+        if parent_id:
+            parent = self.db.get_category_by_id(parent_id)
+            if not parent:
+                return False, "Selected parent does not exist"
+            
+            current_parent = parent[1]
+            while current_parent:
+                if current_parent == category_id:
+                    return False, "Cannot assign a child category as parent"
+                next_parent = self.db.get_category_by_id(current_parent)
+                current_parent = next_parent[1] if next_parent else None
+        
+        self.db.update_category(category_id, name, category_type, parent_id)
+        return True, "Category updated successfully"
+    
     def get_categories(self, category_type=None):
         """Get all categories for current user"""
         return self.db.get_all_categories(category_type)
@@ -297,8 +325,65 @@ class BudgetingSystem:
             return []
         return self.db.get_budgets(self.current_user_id)
     
+    def update_budget(self, budget_id, category_id, limit_amount, start_date, end_date):
+        """Update an existing budget"""
+        if not self.current_user_id:
+            return False, "Not logged in"
+        
+        budget = self.db.get_budget_by_id(budget_id)
+        if not budget or budget[1] != self.current_user_id:
+            return False, "Budget not found"
+        
+        try:
+            limit_amount = float(limit_amount)
+            if limit_amount <= 0:
+                return False, "Limit must be positive"
+        except:
+            return False, "Invalid limit amount"
+        
+        # Validate dates
+        try:
+            datetime.datetime.strptime(start_date, "%Y-%m-%d")
+            datetime.datetime.strptime(end_date, "%Y-%m-%d")
+        except:
+            return False, "Invalid date format. Use YYYY-MM-DD"
+        
+        if end_date < start_date:
+            return False, "End date must be after start date"
+        
+        # Validate category
+        category = self.db.get_category_by_id(category_id)
+        if not category:
+            return False, "Invalid category"
+        
+        # Check overlapping budgets excluding current budget
+        query = """
+            SELECT COUNT(*) FROM budgets
+            WHERE user_id = ? AND category_id = ?
+            AND budget_id != ?
+            AND (start_date <= ? AND end_date >= ?)
+        """
+        count = self.db.execute_query(
+            query,
+            (self.current_user_id, category_id, budget_id, end_date, start_date),
+            fetch_one=True
+        )[0]
+        
+        if count > 0:
+            return False, "Budget already exists for this category in the selected period"
+        
+        self.db.update_budget(budget_id, category_id, limit_amount, start_date, end_date)
+        return True, "Budget updated successfully"
+    
     def delete_budget(self, budget_id):
         """Delete budget"""
+        if not self.current_user_id:
+            return False, "Not logged in"
+        
+        budget = self.db.get_budget_by_id(budget_id)
+        if not budget or budget[1] != self.current_user_id:
+            return False, "Budget not found"
+        
         self.db.delete_budget(budget_id)
         return True, "Budget deleted successfully"
     

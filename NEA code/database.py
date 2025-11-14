@@ -207,9 +207,13 @@ class DatabaseManager:
         query = "SELECT * FROM categories WHERE name = ?"
         return self.execute_query(query, (name,), fetch_one=True)
     
-    def update_category(self, category_id, name, category_type):
-        query = "UPDATE categories SET name = ?, type = ? WHERE category_id = ?"
-        self.execute_query(query, (name, category_type, category_id))
+    def get_category_by_id(self, category_id):
+        query = "SELECT * FROM categories WHERE category_id = ?"
+        return self.execute_query(query, (category_id,), fetch_one=True)
+    
+    def update_category(self, category_id, name, category_type, parent_id=None):
+        query = "UPDATE categories SET name = ?, type = ?, parent_category_id = ? WHERE category_id = ?"
+        self.execute_query(query, (name, category_type, parent_id, category_id))
     
     def delete_category(self, category_id):
         query = "DELETE FROM categories WHERE category_id = ?"
@@ -276,9 +280,17 @@ class DatabaseManager:
             params.append(category_id)
         return self.execute_query(query, params, fetch_all=True)
     
-    def update_budget(self, budget_id, limit_amount, end_date):
-        query = "UPDATE budgets SET limit_amount = ?, end_date = ? WHERE budget_id = ?"
-        self.execute_query(query, (limit_amount, end_date, budget_id))
+    def get_budget_by_id(self, budget_id):
+        query = "SELECT * FROM budgets WHERE budget_id = ?"
+        return self.execute_query(query, (budget_id,), fetch_one=True)
+    
+    def update_budget(self, budget_id, category_id, limit_amount, start_date, end_date):
+        query = """
+            UPDATE budgets
+            SET category_id = ?, limit_amount = ?, start_date = ?, end_date = ?
+            WHERE budget_id = ?
+        """
+        self.execute_query(query, (category_id, limit_amount, start_date, end_date, budget_id))
     
     def delete_budget(self, budget_id):
         query = "DELETE FROM budgets WHERE budget_id = ?"
@@ -388,4 +400,3 @@ class DatabaseManager:
         except Exception as e:
             print(f"Restore error: {e}")
             return False
-
