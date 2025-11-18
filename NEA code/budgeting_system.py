@@ -619,14 +619,15 @@ class BudgetingSystem:
         """Verify the provided password against the current user's credentials"""
         if not self.current_user_id:
             return False
-        
-        query = "SELECT password_hash, salt FROM users WHERE user_id = ?"
-        result = self.db.execute_query(query, (self.current_user_id,), fetch_one=True)
-        if not result:
+        username = self.get_current_username()
+        if not username:
             return False
-        
-        password_hash, salt = result
-        return self.security.verify_password(password, salt, password_hash)
+        user = self.db.get_user_by_username(username)
+        if not user:
+            return False
+        salt = user[4]
+        stored_hash = user[3]
+        return self.security.verify_password(password, salt, stored_hash)
     
     # Backup and Restore
     def backup_data(self, backup_path):

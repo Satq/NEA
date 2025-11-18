@@ -1953,20 +1953,19 @@ class BudgetingApp:
             fg="#dddddd"
         ).pack()
         
-        password_var = tk.StringVar()
-        entry = ttk.Entry(container, textvariable=password_var, show="*")
+        entry = ttk.Entry(container, show="*")
         entry.pack(pady=12, fill="x")
         status_label = tk.Label(container, text="", bg="#1f1f1f", fg="#ff6b6b")
         status_label.pack()
         
         def attempt_unlock():
-            password = password_var.get()
+            password = entry.get().strip()
             if not password:
                 status_label.config(text="Please enter your password.")
                 return
             if self._verify_unlock_password(password):
                 self.unlock_interface()
-                password_var.set("")
+                entry.delete(0, tk.END)
                 status_label.config(text="")
             else:
                 status_label.config(text="Incorrect password.")
