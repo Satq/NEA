@@ -304,9 +304,21 @@ class DatabaseManager:
         """
         return self.execute_query(query, (user_id, name, goal_type, target_amount, target_date, linked_category, rank))
     
+    def get_goal_by_id(self, goal_id):
+        query = "SELECT * FROM goals WHERE goal_id = ?"
+        return self.execute_query(query, (goal_id,), fetch_one=True)
+    
     def get_goals(self, user_id):
         query = "SELECT * FROM goals WHERE user_id = ? ORDER BY rank ASC NULLS LAST, goal_id ASC"
         return self.execute_query(query, (user_id,), fetch_all=True)
+    
+    def update_goal(self, goal_id, name, goal_type, target_amount, target_date, linked_category):
+        query = """
+            UPDATE goals
+            SET name = ?, type = ?, target_amount = ?, target_date = ?, linked_category = ?
+            WHERE goal_id = ?
+        """
+        self.execute_query(query, (name, goal_type, target_amount, target_date, linked_category, goal_id))
     
     def update_goal_progress(self, goal_id, current_amount, progress, status):
         query = "UPDATE goals SET current_amount = ?, progress = ?, status = ? WHERE goal_id = ?"

@@ -413,6 +413,30 @@ class BudgetingSystem:
         
         return True, "Goal created successfully"
     
+    def update_goal(self, goal_id, name, goal_type, target_amount, target_date, linked_category=None):
+        """Update an existing goal"""
+        if not self.current_user_id:
+            return False, "Not logged in"
+        goal = self.db.get_goal_by_id(goal_id)
+        if not goal or goal[1] != self.current_user_id:
+            return False, "Goal not found"
+        try:
+            target_amount = float(target_amount)
+            if target_amount <= 0:
+                return False, "Target amount must be positive"
+        except:
+            return False, "Invalid target amount"
+        try:
+            datetime.datetime.strptime(target_date, "%Y-%m-%d")
+        except:
+            return False, "Invalid date format. Use YYYY-MM-DD"
+        if linked_category:
+            category = self.db.get_category_by_id(linked_category)
+            if not category:
+                return False, "Invalid linked category"
+        self.db.update_goal(goal_id, name, goal_type, target_amount, target_date, linked_category)
+        return True, "Goal updated successfully"
+    
     def get_goals(self):
         """Get all goals for current user"""
         if not self.current_user_id:
@@ -426,6 +450,11 @@ class BudgetingSystem:
     
     def delete_goal(self, goal_id):
         """Delete goal"""
+        if not self.current_user_id:
+            return False, "Not logged in"
+        goal = self.db.get_goal_by_id(goal_id)
+        if not goal or goal[1] != self.current_user_id:
+            return False, "Goal not found"
         self.db.delete_goal(goal_id)
         return True, "Goal deleted successfully"
     

@@ -10,6 +10,7 @@ import time
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.patches import Circle
 
 from gui.translations import DEFAULT_LANGUAGE, LANGUAGE_MAP, translate_text
 
@@ -22,6 +23,7 @@ class BudgetingApp:
         self.system = system
         self.root.title("Smart Budgeting System")
         self.root.geometry("1200x800")
+        self.root.protocol("WM_DELETE_WINDOW", self._confirm_application_exit)
         prefs = self.system.get_preferences()
         self.current_language = (
             prefs[5] if prefs and len(prefs) > 5 and prefs[5] in LANGUAGE_MAP else DEFAULT_LANGUAGE
@@ -31,6 +33,7 @@ class BudgetingApp:
         self.locked = False
         self.lock_overlay = None
         self.language_window = None
+        self.goal_ring_has_goal = False
         
         # Store reference to db for direct access
         self.db = system.db
@@ -48,6 +51,15 @@ class BudgetingApp:
         
         # Refresh data
         self.refresh_data()
+
+    def _confirm_application_exit(self):
+        """Show confirmation dialog before closing the entire app"""
+        answer = messagebox.askyesno(
+            "Exit Smart Budgeting System",
+            "Are you sure you want to quit?"
+        )
+        if answer:
+            self.root.destroy()
     
     def create_menu(self):
         """Create application menu bar"""
@@ -265,6 +277,10 @@ class BudgetingApp:
             self.quick_action_buttons["delete"].config(text=self._t("delete_transaction"))
             self.quick_action_buttons["edit"].config(text=self._t("edit_transaction"))
             self.quick_action_buttons["view"].config(text=self._t("view_transactions"))
+        if hasattr(self, "goal_ring_label"):
+            self.goal_ring_label.config(text=self._t("current_goal"))
+        if hasattr(self, "goal_ring_subtitle") and not self.goal_ring_has_goal:
+            self.goal_ring_subtitle.config(text=self._t("goal_ring_empty"))
     
     def open_settings_window(self):
         """Open settings placeholder window"""
@@ -456,16 +472,50 @@ class BudgetingApp:
         self.income_canvas = FigureCanvasTkAgg(self.income_fig, master=self.income_frame)
         self.income_canvas.get_tk_widget().pack(fill="both", expand=True)
         
-        # Right panel holds recent transactions & quick actions
+        # Right panel holds the goal ring, recent transactions & quick actions
         right_panel = ttk.Frame(self.dashboard_frame, padding=10)
         right_panel.grid(row=1, column=1, sticky="ns")
-        right_panel.rowconfigure(1, weight=1)
+        right_panel.rowconfigure(2, weight=1)
+        
+        self.goal_ring_frame = tk.Frame(
+            right_panel,
+            bg="white",
+            highlightbackground="#111111",
+            highlightthickness=2,
+            padx=10,
+            pady=8
+        )
+        self.goal_ring_frame.grid(row=0, column=0, sticky="ew", pady=(0, 15))
+        self.goal_ring_frame.columnconfigure(0, weight=1)
+        self.goal_ring_label = tk.Label(
+            self.goal_ring_frame,
+            text=self._t("current_goal"),
+            font=("Helvetica", 13, "bold"),
+            bg="white"
+        )
+        self.goal_ring_label.pack(pady=(0, 6))
+        self.goal_ring_fig, self.goal_ring_ax = plt.subplots(figsize=(2.3, 2.3))
+        self.goal_ring_fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        self.goal_ring_fig.patch.set_facecolor("white")
+        self.goal_ring_canvas = FigureCanvasTkAgg(self.goal_ring_fig, master=self.goal_ring_frame)
+        goal_canvas_widget = self.goal_ring_canvas.get_tk_widget()
+        goal_canvas_widget.pack(fill="both", expand=True)
+        goal_canvas_widget.configure(bg="white", highlightthickness=0)
+        self.goal_ring_subtitle = tk.Label(
+            self.goal_ring_frame,
+            text=self._t("goal_ring_empty"),
+            font=("Helvetica", 11),
+            wraplength=160,
+            justify="center",
+            bg="white"
+        )
+        self.goal_ring_subtitle.pack(pady=(6, 0))
         
         self.recent_label = ttk.Label(right_panel, text=self._t("recent_transactions"), font=("Helvetica", 14, "bold"))
-        self.recent_label.grid(row=0, column=0, sticky="nw", pady=(0, 10))
+        self.recent_label.grid(row=1, column=0, sticky="nw", pady=(0, 10))
         
         self.recent_container = ttk.Frame(right_panel)
-        self.recent_container.grid(row=1, column=0, sticky="nsew")
+        self.recent_container.grid(row=2, column=0, sticky="nsew")
         self.recent_rows = []
         for _ in range(7):
             row = ttk.Frame(self.recent_container)
@@ -479,7 +529,7 @@ class BudgetingApp:
             self.recent_rows.append({"desc": desc, "arrow": arrow})
         
         self.actions_frame = ttk.LabelFrame(right_panel, text=self._t("quick_actions"), padding=10)
-        self.actions_frame.grid(row=2, column=0, sticky="ew", pady=(15, 0))
+        self.actions_frame.grid(row=3, column=0, sticky="ew", pady=(15, 0))
         for i in range(2):
             self.actions_frame.columnconfigure(i, weight=1)
         
@@ -775,6 +825,14 @@ class BudgetingApp:
         self.goals_tree.column('Progress', width=100, anchor='center')
         self.goals_tree.column('Target Date', width=100, anchor='center')
         self.goals_tree.column('Status', width=80, anchor='center')
+        self.goals_tree.bind("<Double-1>", self.edit_goal)
+        self.goals_menu = tk.Menu(self.goals_tree, tearoff=0)
+        self.goals_menu.add_command(label="Edit Goal", command=self.edit_goal)
+        self.goals_menu.add_command(label="Delete Goal", command=self.delete_goal)
+        self.goals_tree.bind(
+            "<Button-3>",
+            lambda event: self._show_tree_context_menu(event, self.goals_tree, self.goals_menu)
+        )
     
     def create_reports_tab(self):
         """Create reports interface"""
@@ -829,6 +887,7 @@ class BudgetingApp:
             end_date = today.replace(month=today.month+1, day=1) - datetime.timedelta(days=1)
         
         transactions = self.system.get_transactions(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+        goals = self.system.get_goals()
         
         income = sum(t[5] for t in transactions if t[6] == 'income')
         expenses = sum(t[5] for t in transactions if t[6] == 'expense')
@@ -897,6 +956,9 @@ class BudgetingApp:
             self.income_ax.text(0.5, 0.5, "No income data yet", ha="center", va="center", transform=self.income_ax.transAxes)
         self.income_canvas.draw()
         
+        # Update compact goal ring element
+        self._update_goal_ring(goals)
+        
         # Update recent transactions view
         sorted_transactions = sorted(transactions, key=lambda t: t[3] or "", reverse=True)
         for idx, row in enumerate(self.recent_rows):
@@ -916,7 +978,74 @@ class BudgetingApp:
             else:
                 row["desc"].config(text="No recent activity")
                 row["arrow"].config(text="-", fg="#555555")
-    
+
+    def _update_goal_ring(self, goals=None):
+        """Render the compact goal progress ring"""
+        if not hasattr(self, "goal_ring_ax"):
+            return
+        if goals is None:
+            goals = self.system.get_goals()
+        self.goal_ring_ax.clear()
+        self.goal_ring_ax.set(aspect='equal')
+        self.goal_ring_ax.axis('off')
+        self.goal_ring_fig.patch.set_facecolor("white")
+        if not goals:
+            self.goal_ring_has_goal = False
+            if hasattr(self, "goal_ring_subtitle"):
+                self.goal_ring_subtitle.config(text=self._t("goal_ring_empty"))
+            self.goal_ring_canvas.draw()
+            return
+        # Prefer the highest priority active goal
+        primary_goal = next((goal for goal in goals if goal[9] != 'completed'), goals[0])
+        target_amount = primary_goal[5] or 0
+        current_amount = primary_goal[7] or 0
+        progress_value = primary_goal[8] or 0
+        if target_amount > 0 and progress_value <= 0 and current_amount:
+            progress_value = (current_amount / target_amount) * 100
+        progress_value = max(0.0, min(progress_value, 100.0))
+        remainder = max(0.0, 100.0 - progress_value)
+        data = [progress_value]
+        colors = ["#f06292"]
+        if remainder > 0:
+            data.append(remainder)
+            colors.append("#fde4e4")
+        self.goal_ring_ax.pie(
+            data,
+            startangle=90,
+            colors=colors,
+            counterclock=False,
+            wedgeprops={"width": 0.30, "edgecolor": "white"}
+        )
+        inner_circle = Circle((0, 0), 0.55, color='white', zorder=3)
+        outer_circle = Circle((0, 0), 1.02, fill=False, linewidth=1.5, edgecolor="#111111", zorder=4)
+        self.goal_ring_ax.add_patch(inner_circle)
+        self.goal_ring_ax.add_patch(outer_circle)
+        self.goal_ring_ax.text(
+            0,
+            0.2,
+            self._t("current_goal"),
+            ha="center",
+            va="center",
+            fontsize=10,
+            fontweight='bold',
+            zorder=10
+        )
+        self.goal_ring_ax.text(
+            0,
+            -0.05,
+            f"{progress_value:.0f}%",
+            ha="center",
+            va="center",
+            fontsize=18,
+            fontweight='bold',
+            zorder=10
+        )
+        goal_name = primary_goal[3]
+        if hasattr(self, "goal_ring_subtitle"):
+            self.goal_ring_subtitle.config(text=goal_name or "")
+        self.goal_ring_has_goal = True
+        self.goal_ring_canvas.draw()
+
     def refresh_transactions(self):
         """Refresh transactions list"""
         for child in self.transactions_tree.get_children():
@@ -1516,6 +1645,95 @@ class BudgetingApp:
             self.goal_name_entry.delete(0, tk.END)
             self.goal_target_entry.delete(0, tk.END)
             self.goal_date_entry.delete(0, tk.END)
+            self.refresh_data()
+        else:
+            messagebox.showerror("Error", message)
+    
+    def edit_goal(self, event=None):
+        """Edit selected goal"""
+        selection = self.goals_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a goal to edit")
+            return
+        goal_id = self.goals_tree.item(selection[0])['values'][0]
+        goal = self.system.db.get_goal_by_id(goal_id)
+        if not goal:
+            messagebox.showerror("Error", "Goal not found")
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Goal")
+        dialog.geometry("380x360")
+        dialog.transient(self.root)
+        ttk.Label(dialog, text="Edit Goal", font=("Helvetica", 14, "bold")).pack(pady=10)
+        form = ttk.Frame(dialog, padding=10)
+        form.pack(fill="both", expand=True)
+        ttk.Label(form, text="Name:").grid(row=0, column=0, sticky="w", pady=5)
+        name_var = tk.StringVar(value=goal[3])
+        name_entry = ttk.Entry(form, textvariable=name_var, width=30)
+        name_entry.grid(row=0, column=1, pady=5)
+        ttk.Label(form, text="Type:").grid(row=1, column=0, sticky="w", pady=5)
+        type_var = tk.StringVar(value=goal[4])
+        type_combo = ttk.Combobox(form, values=["savings", "debt"], textvariable=type_var, state="readonly", width=27)
+        type_combo.grid(row=1, column=1, pady=5)
+        ttk.Label(form, text="Target Amount:").grid(row=2, column=0, sticky="w", pady=5)
+        target_var = tk.StringVar(value=str(goal[5]))
+        target_entry = ttk.Entry(form, textvariable=target_var, width=20)
+        target_entry.grid(row=2, column=1, pady=5)
+        ttk.Label(form, text="Target Date:").grid(row=3, column=0, sticky="w", pady=5)
+        date_var = tk.StringVar(value=goal[6])
+        date_entry = ttk.Entry(form, textvariable=date_var, width=20)
+        date_entry.grid(row=3, column=1, pady=5)
+        ttk.Label(form, text="Linked Category:").grid(row=4, column=0, sticky="w", pady=5)
+        categories = self.system.get_categories()
+        category_names = [c[2] for c in categories]
+        category_options = ["None"] + category_names
+        current_category = self.get_category_name(goal[2])
+        if current_category not in category_options:
+            current_category = "None"
+        category_var = tk.StringVar(value=current_category)
+        category_combo = ttk.Combobox(form, values=category_options, textvariable=category_var, state="readonly", width=27)
+        category_combo.grid(row=4, column=1, pady=5)
+        status_label = ttk.Label(form, text="", foreground="red")
+        status_label.grid(row=5, column=0, columnspan=2, pady=5)
+        def save_goal():
+            name = name_var.get().strip()
+            goal_type = type_var.get()
+            target_amount = target_var.get()
+            target_date = date_var.get()
+            category_choice = category_var.get()
+            if not all([name, goal_type, target_amount, target_date]):
+                status_label.config(text="Please fill all required fields")
+                return
+            category_id = None
+            if category_choice != "None":
+                category = self.system.db.get_category_by_name(category_choice)
+                if not category:
+                    status_label.config(text="Invalid category selected")
+                    return
+                category_id = category[0]
+            success, message = self.system.update_goal(
+                goal_id, name, goal_type, target_amount, target_date, category_id
+            )
+            if success:
+                messagebox.showinfo("Success", message)
+                dialog.destroy()
+                self.refresh_data()
+            else:
+                status_label.config(text=message)
+        ttk.Button(form, text="Save Changes", command=save_goal).grid(row=6, column=0, columnspan=2, pady=10)
+    
+    def delete_goal(self):
+        """Delete selected goal"""
+        selection = self.goals_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a goal to delete")
+            return
+        goal_id = self.goals_tree.item(selection[0])['values'][0]
+        if not messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this goal?"):
+            return
+        success, message = self.system.delete_goal(goal_id)
+        if success:
+            messagebox.showinfo("Success", message)
             self.refresh_data()
         else:
             messagebox.showerror("Error", message)
