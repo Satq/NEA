@@ -31,9 +31,12 @@ class DatabaseManager:
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 salt TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                failed_password_attempts INTEGER DEFAULT 0,
+                lockout_until DATETIME
             )
         """)
+        self._ensure_user_security_columns(cursor)
         
         # Categories table (self-referencing for subcategories)
         cursor.execute("""
@@ -129,6 +132,18 @@ class DatabaseManager:
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
             )
         """)
+
+        # Password history table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS password_history (
+                history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+        """)
         
         # Insert default categories if empty
         cursor.execute("SELECT COUNT(*) FROM categories")
@@ -149,6 +164,15 @@ class DatabaseManager:
         
         conn.commit()
         conn.close()
+
+    def _ensure_user_security_columns(self, cursor):
+        """Ensure new security columns exist for legacy databases"""
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "failed_password_attempts" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN failed_password_attempts INTEGER DEFAULT 0")
+        if "lockout_until" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN lockout_until DATETIME")
     
     def execute_query(self, query, params=None, fetch_one=False, fetch_all=False):
         """Execute query with proper error handling and ACID compliance"""
@@ -179,6 +203,25 @@ class DatabaseManager:
         query = "INSERT INTO users (username, email, password_hash, salt) VALUES (?, ?, ?, ?)"
         return self.execute_query(query, (username, email, password_hash, salt))
     
+    def record_password_history(self, user_id, password_hash, salt):
+        """Keep a record of all previous passwords"""
+        query = "INSERT INTO password_history (user_id, password_hash, salt) VALUES (?, ?, ?)"
+        self.execute_query(query, (user_id, password_hash, salt))
+    
+    def get_password_history(self, user_id, limit=None):
+        """Return full password history for a user"""
+        query = """
+            SELECT password_hash, salt, changed_at
+            FROM password_history
+            WHERE user_id = ?
+            ORDER BY changed_at DESC
+        """
+        params = [user_id]
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        return self.execute_query(query, params, fetch_all=True)
+    
     def get_user_by_username(self, username):
         query = "SELECT * FROM users WHERE username = ?"
         return self.execute_query(query, (username,), fetch_one=True)
@@ -187,9 +230,33 @@ class DatabaseManager:
         query = "SELECT * FROM users WHERE email = ?"
         return self.execute_query(query, (email,), fetch_one=True)
     
-    def update_password(self, user_id, new_hash):
-        query = "UPDATE users SET password_hash = ? WHERE user_id = ?"
-        self.execute_query(query, (new_hash, user_id))
+    def update_password(self, user_id, new_hash, new_salt):
+        query = """
+            UPDATE users
+            SET password_hash = ?, salt = ?, failed_password_attempts = 0, lockout_until = NULL
+            WHERE user_id = ?
+        """
+        self.execute_query(query, (new_hash, new_salt, user_id))
+    
+    def update_failed_attempts(self, user_id, attempts):
+        query = "UPDATE users SET failed_password_attempts = ? WHERE user_id = ?"
+        self.execute_query(query, (attempts, user_id))
+    
+    def set_lockout(self, user_id, lockout_until, attempts=None):
+        if attempts is not None:
+            query = "UPDATE users SET failed_password_attempts = ?, lockout_until = ? WHERE user_id = ?"
+            self.execute_query(query, (attempts, lockout_until, user_id))
+        else:
+            query = "UPDATE users SET lockout_until = ? WHERE user_id = ?"
+            self.execute_query(query, (lockout_until, user_id))
+    
+    def reset_lockout(self, user_id):
+        query = "UPDATE users SET failed_password_attempts = 0, lockout_until = NULL WHERE user_id = ?"
+        self.execute_query(query, (user_id,))
+    
+    def get_user_security_state(self, user_id):
+        query = "SELECT failed_password_attempts, lockout_until FROM users WHERE user_id = ?"
+        return self.execute_query(query, (user_id,), fetch_one=True)
     
     # Category Management Methods
     def create_category(self, name, category_type, parent_id=None):

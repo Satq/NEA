@@ -45,3 +45,13 @@ class SecurityManager:
             return False, "Password must contain special character"
         return True, "Password is strong"
 
+    @staticmethod
+    def password_in_history(password, history_records):
+        """Check whether password appears in stored history"""
+        if not history_records:
+            return False
+        for record in history_records:
+            stored_hash, salt = record[0], record[1]
+            if SecurityManager.verify_password(password, salt, stored_hash):
+                return True
+        return False

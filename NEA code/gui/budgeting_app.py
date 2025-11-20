@@ -33,6 +33,7 @@ class BudgetingApp:
         self.locked = False
         self.lock_overlay = None
         self.language_window = None
+        self.account_window = None
         self.goal_ring_has_goal = False
         
         # Store reference to db for direct access
@@ -297,11 +298,160 @@ class BudgetingApp:
         )
     
     def open_account_manager(self):
-        """Open manage account placeholder window"""
-        self._open_placeholder_window(
-            "Manage Account",
-            "Account management will include updating profile information, security questions, and recovery details."
+        """Open account management window with password update controls"""
+        if self.account_window and tk.Toplevel.winfo_exists(self.account_window):
+            self.account_window.lift()
+            self.account_window.focus_force()
+            return
+        
+        username = self.system.get_current_username() or "Current User"
+        self.account_window = tk.Toplevel(self.root)
+        self.account_window.title("Account & Security")
+        self.account_window.geometry("500x560")
+        self.account_window.transient(self.root)
+        
+        header = ttk.Frame(self.account_window, padding=20)
+        header.pack(fill="x")
+        ttk.Label(header, text="Account Security Centre", font=("Helvetica", 16, "bold")).pack(anchor="w")
+        ttk.Label(
+            header,
+            text=f"Signed in as: {username}",
+            font=("Helvetica", 11)
+        ).pack(anchor="w", pady=(5, 0))
+        ttk.Label(
+            header,
+            text="Update your password and review security status in one place.",
+            font=("Helvetica", 9),
+            foreground="#555555"
+        ).pack(anchor="w", pady=(4, 0))
+        
+        security_frame = ttk.LabelFrame(self.account_window, text="Security Status", padding=15)
+        security_frame.pack(fill="x", padx=20, pady=(0, 15))
+        security_frame.columnconfigure(0, weight=1)
+        ttk.Label(
+            security_frame,
+            text="Current password attempt usage:",
+            font=("Helvetica", 10, "bold")
+        ).grid(row=0, column=0, sticky="w")
+        attempt_progress = ttk.Progressbar(security_frame, length=240, mode="determinate")
+        attempt_progress.grid(row=1, column=0, sticky="we", pady=6)
+        attempt_status = ttk.Label(security_frame, text="Loading status…")
+        attempt_status.grid(row=2, column=0, sticky="w")
+        lock_label = ttk.Label(security_frame, text="", foreground="#0a7d34")
+        lock_label.grid(row=3, column=0, sticky="w", pady=(6, 0))
+        
+        def refresh_security_state():
+            state = self.system.get_password_security_status()
+            if not state:
+                attempt_progress.config(value=0, maximum=1)
+                attempt_status.config(text="Security status unavailable.")
+                lock_label.config(text="Unable to retrieve lockout information.", foreground="#b10c0c")
+                return
+            attempts = state.get("attempts", 0) or 0
+            limit = state.get("limit", 1) or 1
+            attempt_progress.config(maximum=limit, value=min(attempts, limit))
+            attempt_status.config(text=f"{attempts} of {limit} attempt(s) used.")
+            lockout_until = state.get("lockout_until")
+            if lockout_until:
+                try:
+                    lock_time = datetime.datetime.strptime(lockout_until, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    lock_time = None
+                if lock_time and lock_time > datetime.datetime.now():
+                    remaining = lock_time - datetime.datetime.now()
+                    minutes = max(1, int(remaining.total_seconds() // 60) or 1)
+                    formatted = lock_time.strftime("%d %b %Y %H:%M:%S")
+                    lock_label.config(
+                        text=f"Account locked until {formatted} ({minutes} minute(s) remaining).",
+                        foreground="#b10c0c"
+                    )
+                else:
+                    lock_label.config(text="No active lockouts.", foreground="#0a7d34")
+            else:
+                lock_label.config(text="No active lockouts.", foreground="#0a7d34")
+        
+        form_frame = ttk.LabelFrame(self.account_window, text="Update Password", padding=20)
+        form_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        form_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(form_frame, text="Current Password:").grid(row=0, column=0, sticky="w", pady=4)
+        current_entry = ttk.Entry(form_frame, show="*", width=32)
+        current_entry.grid(row=0, column=1, pady=4, sticky="we")
+        
+        ttk.Label(form_frame, text="New Password:").grid(row=1, column=0, sticky="w", pady=4)
+        new_entry = ttk.Entry(form_frame, show="*", width=32)
+        new_entry.grid(row=1, column=1, pady=4, sticky="we")
+        
+        ttk.Label(form_frame, text="Confirm Password:").grid(row=2, column=0, sticky="w", pady=4)
+        confirm_entry = ttk.Entry(form_frame, show="*", width=32)
+        confirm_entry.grid(row=2, column=1, pady=4, sticky="we")
+        
+        requirements = (
+            "Password must include:\n"
+            "• Minimum 8 characters\n"
+            "• Upper & lowercase letters\n"
+            "• At least one digit and special symbol\n"
+            "• Not used previously"
         )
+        ttk.Label(form_frame, text=requirements, font=("Helvetica", 9), justify="left").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(4, 8)
+        )
+        
+        show_var = tk.BooleanVar(value=False)
+        
+        def toggle_visibility():
+            show_char = "" if show_var.get() else "*"
+            new_entry.config(show=show_char)
+            confirm_entry.config(show=show_char)
+        
+        ttk.Checkbutton(
+            form_frame,
+            text="Show new password",
+            variable=show_var,
+            command=toggle_visibility
+        ).grid(row=4, column=0, columnspan=2, sticky="w")
+        
+        status_label = ttk.Label(form_frame, text="", foreground="#b10c0c", wraplength=320, justify="left")
+        status_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        
+        def clear_fields():
+            current_entry.delete(0, tk.END)
+            new_entry.delete(0, tk.END)
+            confirm_entry.delete(0, tk.END)
+            status_label.config(text="")
+        
+        def submit_password_change():
+            current = current_entry.get().strip()
+            new = new_entry.get().strip()
+            confirm = confirm_entry.get().strip()
+            
+            if not all([current, new, confirm]):
+                status_label.config(text="Please complete all password fields.", foreground="#b10c0c")
+                return
+            
+            success, message = self.system.change_password(current, new, confirm)
+            if success:
+                status_label.config(text=message, foreground="#0a7d34")
+                messagebox.showinfo("Password Updated", message)
+                clear_fields()
+            else:
+                status_label.config(text=message, foreground="#b10c0c")
+            refresh_security_state()
+        
+        button_frame = ttk.Frame(form_frame)
+        button_frame.grid(row=6, column=0, columnspan=2, pady=12, sticky="e")
+        ttk.Button(button_frame, text="Update Password", command=submit_password_change).grid(row=0, column=0, padx=5)
+        ttk.Button(button_frame, text="Clear", command=clear_fields).grid(row=0, column=1, padx=5)
+        
+        refresh_security_state()
+        current_entry.focus_set()
+        
+        def handle_close():
+            if self.account_window:
+                self.account_window.destroy()
+                self.account_window = None
+        
+        self.account_window.protocol("WM_DELETE_WINDOW", handle_close)
     
     def open_accessibility_center(self):
         """Open accessibility placeholder window"""
@@ -1810,54 +1960,8 @@ class BudgetingApp:
             messagebox.showerror("Export Error", str(e))
     
     def change_password(self):
-        """Show change password dialog"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Change Password")
-        dialog.geometry("400x350")
-        dialog.transient(self.root)
-        
-        ttk.Label(dialog, text="Change Password", font=("Helvetica", 14, "bold")).pack(pady=10)
-        
-        form_frame = ttk.Frame(dialog, padding=20)
-        form_frame.pack(fill="both", expand=True)
-        
-        ttk.Label(form_frame, text="Current Password:").grid(row=0, column=0, sticky="w", pady=5)
-        current_entry = ttk.Entry(form_frame, show="*", width=30)
-        current_entry.grid(row=0, column=1, pady=5)
-        
-        ttk.Label(form_frame, text="New Password:").grid(row=1, column=0, sticky="w", pady=5)
-        new_entry = ttk.Entry(form_frame, show="*", width=30)
-        new_entry.grid(row=1, column=1, pady=5)
-        
-        ttk.Label(form_frame, text="Confirm Password:").grid(row=2, column=0, sticky="w", pady=5)
-        confirm_entry = ttk.Entry(form_frame, show="*", width=30)
-        confirm_entry.grid(row=2, column=1, pady=5)
-        
-        # Requirements label
-        req_text = "Password requirements:\n• 8+ characters\n• Upper & lowercase\n• Number & symbol"
-        ttk.Label(form_frame, text=req_text, font=("Helvetica", 8)).grid(row=3, column=0, columnspan=2, pady=5)
-        
-        status_label = ttk.Label(form_frame, text="", foreground="red")
-        status_label.grid(row=4, column=0, columnspan=2, pady=5)
-        
-        def change():
-            current = current_entry.get()
-            new = new_entry.get()
-            confirm = confirm_entry.get()
-            
-            if not all([current, new, confirm]):
-                status_label.config(text="Please fill all fields")
-                return
-            
-            success, message = self.system.change_password(current, new, confirm)
-            
-            if success:
-                messagebox.showinfo("Success", message)
-                dialog.destroy()
-            else:
-                status_label.config(text=message)
-        
-        ttk.Button(form_frame, text="Change Password", command=change).grid(row=5, column=0, columnspan=2, pady=10)
+        """Route to the account manager interface for password changes"""
+        self.open_account_manager()
     
     def manage_preferences(self):
         """Show preferences dialog"""

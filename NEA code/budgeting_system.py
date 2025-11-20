@@ -23,6 +23,8 @@ class BudgetingSystem:
         self.current_user_id = None
         self.session_token = None
         self.alert_thresholds = [75, 90, 100]
+        self.password_attempt_limit = 5
+        self.password_lock_minutes = 10
     
     # User Management
     def register_user(self, username, email, password):
@@ -47,6 +49,7 @@ class BudgetingSystem:
         
         # Create default preferences
         self.db.create_user_preferences(user_id)
+        self.db.record_password_history(user_id, password_hash, salt)
         
         return True, "Registration successful"
     
@@ -84,9 +87,46 @@ class BudgetingSystem:
         if not user:
             return False, "User not found"
         
+        failed_attempts = user[6] if len(user) > 6 and user[6] is not None else 0
+        lockout_value = user[7] if len(user) > 7 else None
+        now = datetime.datetime.now()
+        
+        # Check lockout status
+        if lockout_value:
+            try:
+                lockout_until = datetime.datetime.strptime(lockout_value, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                lockout_until = None
+            if lockout_until and lockout_until > now:
+                remaining = lockout_until - now
+                minutes = max(1, int(remaining.total_seconds() // 60) or 1)
+                return False, f"Account is locked. Try again in approximately {minutes} minute(s)."
+            elif lockout_value:
+                # Lockout expired, reset counters
+                self.db.reset_lockout(self.current_user_id)
+                failed_attempts = 0
+        
         # Verify current password
         if not self.security.verify_password(current_password, user[4], user[3]):
-            return False, "Current password is incorrect"
+            failed_attempts += 1
+            if failed_attempts >= self.password_attempt_limit:
+                lockout_until = now + datetime.timedelta(minutes=self.password_lock_minutes)
+                self.db.set_lockout(
+                    self.current_user_id,
+                    lockout_until.strftime("%Y-%m-%d %H:%M:%S"),
+                    failed_attempts
+                )
+                return False, (
+                    f"Too many failed attempts. Account locked for {self.password_lock_minutes} minutes."
+                )
+            else:
+                self.db.update_failed_attempts(self.current_user_id, failed_attempts)
+                remaining_attempts = self.password_attempt_limit - failed_attempts
+                return False, (
+                    f"Current password is incorrect. {remaining_attempts} attempt(s) remaining before lockout."
+                )
+        elif failed_attempts:
+            self.db.reset_lockout(self.current_user_id)
         
         # Validate new password
         if new_password != confirm_password:
@@ -100,12 +140,38 @@ class BudgetingSystem:
         if self.security.verify_password(new_password, user[4], user[3]):
             return False, "New password cannot be same as old password"
         
+        # Prevent reuse of any previous password
+        history = self.db.get_password_history(self.current_user_id)
+        if not history:
+            # Seed history for legacy accounts missing an entry
+            self.db.record_password_history(self.current_user_id, user[3], user[4])
+            history = self.db.get_password_history(self.current_user_id)
+        if self.security.password_in_history(new_password, history):
+            return False, "New password cannot match previously used passwords"
+        
         # Generate new hash and update
         salt = self.security.generate_salt()
         new_hash = self.security.hash_password(new_password, salt)
-        self.db.update_password(self.current_user_id, new_hash)
+        self.db.update_password(self.current_user_id, new_hash, salt)
+        self.db.record_password_history(self.current_user_id, new_hash, salt)
         
         return True, "Password changed successfully"
+    
+    def get_password_security_status(self):
+        """Return current password attempt and lockout information"""
+        if not self.current_user_id:
+            return None
+        state = self.db.get_user_security_state(self.current_user_id)
+        if not state:
+            return None
+        attempts = state[0] or 0
+        lockout_until = state[1]
+        return {
+            "attempts": attempts,
+            "limit": self.password_attempt_limit,
+            "lockout_until": lockout_until,
+            "lock_minutes": self.password_lock_minutes
+        }
     
     def get_current_username(self):
         """Get username of current logged-in user"""
