@@ -35,6 +35,7 @@ class BudgetingApp:
         self.language_window = None
         self.account_window = None
         self.goal_ring_has_goal = False
+        self.nav_style_initialized = False
         
         # Store reference to db for direct access
         self.db = system.db
@@ -52,6 +53,37 @@ class BudgetingApp:
         
         # Refresh data
         self.refresh_data()
+
+    def _configure_notebook_style(self):
+        """Create a bold navigation tab style for the main menus"""
+        if self.nav_style_initialized:
+            return
+        style = ttk.Style(self.root)
+        style.configure(
+            "Nav.TNotebook",
+            background="#1f1f1f",
+            tabmargins=(4, 8, 4, 0)
+        )
+        style.configure(
+            "Nav.TNotebook.Tab",
+            font=("Helvetica Neue", 12, "bold"),
+            padding=(18, 12),
+            foreground="#f5f5f5",
+            background="#2a2a2a"
+        )
+        style.map(
+            "Nav.TNotebook.Tab",
+            background=[
+                ("selected", "#3f51b5"),
+                ("active", "#303f9f")
+            ],
+            foreground=[
+                ("selected", "#ffffff"),
+                ("active", "#ffffff"),
+                ("!active", "#d9d9d9")
+            ]
+        )
+        self.nav_style_initialized = True
 
     def _confirm_application_exit(self):
         """Show confirmation dialog before closing the entire app"""
@@ -309,6 +341,19 @@ class BudgetingApp:
         self.account_window.title("Account & Security")
         self.account_window.geometry("500x560")
         self.account_window.transient(self.root)
+        style = ttk.Style(self.account_window)
+        style.configure(
+            "Confirm.TButton",
+            font=("Helvetica", 11, "bold"),
+            foreground="white",
+            background="#4caf50",
+            padding=(12, 6)
+        )
+        style.map(
+            "Confirm.TButton",
+            background=[("active", "#43a047"), ("disabled", "#9e9e9e")],
+            foreground=[("disabled", "#f5f5f5")]
+        )
         
         header = ttk.Frame(self.account_window, padding=20)
         header.pack(fill="x")
@@ -439,9 +484,15 @@ class BudgetingApp:
             refresh_security_state()
         
         button_frame = ttk.Frame(form_frame)
-        button_frame.grid(row=6, column=0, columnspan=2, pady=12, sticky="e")
-        ttk.Button(button_frame, text="Update Password", command=submit_password_change).grid(row=0, column=0, padx=5)
-        ttk.Button(button_frame, text="Clear", command=clear_fields).grid(row=0, column=1, padx=5)
+        button_frame.grid(row=6, column=0, columnspan=2, pady=14, sticky="ew")
+        confirm_btn = ttk.Button(
+            button_frame,
+            text="Confirm Changes",
+            command=submit_password_change,
+            style="Confirm.TButton"
+        )
+        confirm_btn.pack(side="left", expand=True, fill="x", padx=(0, 8))
+        ttk.Button(button_frame, text="Clear", command=clear_fields).pack(side="left")
         
         refresh_security_state()
         current_entry.focus_set()
@@ -534,9 +585,11 @@ class BudgetingApp:
     
     def create_main_interface(self):
         """Create main dashboard interface"""
+        self._configure_notebook_style()
+        
         # Create notebook for tabs
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
+        self.notebook = ttk.Notebook(self.root, style="Nav.TNotebook")
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Dashboard Tab
         self.dashboard_frame = ttk.Frame(self.notebook, padding=10)
