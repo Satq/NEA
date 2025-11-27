@@ -1,6 +1,7 @@
-# Smart Budgeting System - Business Logic Layer
-# Author: Sathvik Devireddy
-# Core business logic for the Smart Budgeting System
+"""
+Business logic for the Smart Budgeting System.
+This file keeps all behaviours the same but adds simple, student-style comments.
+"""
 
 import datetime
 import csv
@@ -15,21 +16,30 @@ from security import SecurityManager
 
 
 class BudgetingSystem:
-    """Core business logic for the Smart Budgeting System"""
+    """Core business logic for the Smart Budgeting System."""
     
     def __init__(self):
+        # Connect to the database and security helpers.
         self.db = DatabaseManager()
         self.security = SecurityManager()
+
+        # Track who is logged in.
         self.current_user_id = None
         self.session_token = None
+
+        # Alert settings for budgets (percentages).
         self.alert_thresholds = [75, 90, 100]
+
+        # Login security settings.
         self.password_attempt_limit = 5
         self.password_lock_minutes = 10
     
+    # -----------------------
     # User Management
+    # -----------------------
     def register_user(self, username, email, password):
-        """Register new user with validation"""
-        # Check if user exists
+        """Register new user with validation."""
+        # Stop duplicate usernames or emails.
         if self.db.get_user_by_username(username):
             return False, "Username already exists"
         if self.db.get_user_by_email(email):
@@ -40,30 +50,29 @@ class BudgetingSystem:
         if not is_valid:
             return False, message
         
-        # Generate salt and hash password
+        # Generate salt and hash password so we never store plain text.
         salt = self.security.generate_salt()
         password_hash = self.security.hash_password(password, salt)
         
-        # Create user
+        # Create user and their default preferences/history.
         user_id = self.db.create_user(username, email, password_hash, salt)
         
-        # Create default preferences
         self.db.create_user_preferences(user_id)
         self.db.record_password_history(user_id, password_hash, salt)
         
         return True, "Registration successful"
     
     def login(self, username, password):
-        """Authenticate user and create session"""
+        """Authenticate user and create session."""
         user = self.db.get_user_by_username(username)
         if not user:
             return False, "Invalid username or password"
         
-        # Verify password
+        # Verify password using stored hash and salt (index 4 and 3).
         if not self.security.verify_password(password, user[4], user[3]):
             return False, "Invalid username or password"
         
-        # Create session
+        # Save login info and create a new session token.
         self.current_user_id = user[0]
         self.session_token = self.security.generate_session_token()
         self.db.create_session(self.current_user_id, self.session_token)
@@ -78,11 +87,11 @@ class BudgetingSystem:
             self.session_token = None
     
     def change_password(self, current_password, new_password, confirm_password):
-        """Change user password with security checks"""
+        """Change user password with security checks."""
         if not self.current_user_id:
             return False, "Not logged in"
         
-        # Get current user
+        # Look up the current user for hash comparisons.
         user = self.db.get_user_by_username(self.get_current_username())
         if not user:
             return False, "User not found"
@@ -91,7 +100,7 @@ class BudgetingSystem:
         lockout_value = user[7] if len(user) > 7 else None
         now = datetime.datetime.now()
         
-        # Check lockout status
+        # Check lockout status to block too many wrong guesses.
         if lockout_value:
             try:
                 lockout_until = datetime.datetime.strptime(lockout_value, "%Y-%m-%d %H:%M:%S")
@@ -102,11 +111,11 @@ class BudgetingSystem:
                 minutes = max(1, int(remaining.total_seconds() // 60) or 1)
                 return False, f"Account is locked. Try again in approximately {minutes} minute(s)."
             elif lockout_value:
-                # Lockout expired, reset counters
+                # Lockout expired, reset counters.
                 self.db.reset_lockout(self.current_user_id)
                 failed_attempts = 0
         
-        # Verify current password
+        # Verify the old password first before changing it.
         if not self.security.verify_password(current_password, user[4], user[3]):
             failed_attempts += 1
             if failed_attempts >= self.password_attempt_limit:
@@ -140,7 +149,7 @@ class BudgetingSystem:
         if self.security.verify_password(new_password, user[4], user[3]):
             return False, "New password cannot be same as old password"
         
-        # Prevent reuse of any previous password
+        # Prevent reuse of any previous password by checking history.
         history = self.db.get_password_history(self.current_user_id)
         if not history:
             # Seed history for legacy accounts missing an entry
@@ -149,7 +158,7 @@ class BudgetingSystem:
         if self.security.password_in_history(new_password, history):
             return False, "New password cannot match previously used passwords"
         
-        # Generate new hash and update
+        # Generate new hash and update all password records.
         salt = self.security.generate_salt()
         new_hash = self.security.hash_password(new_password, salt)
         self.db.update_password(self.current_user_id, new_hash, salt)

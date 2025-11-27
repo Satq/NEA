@@ -1,6 +1,7 @@
-# Smart Budgeting System - Login Window GUI
-# Author: Sathvik Devireddy
-# Login and Registration Interface
+"""
+Login and registration window for the Smart Budgeting System.
+The look stays the same while the comments are clearer for students.
+"""
 
 import tkinter as tk
 from tkinter import ttk, messagebox

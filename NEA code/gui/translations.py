@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Language translations used by the budgeting app."""
+"""
+Basic translation dictionary for the GUI labels.
+Simple lookups are used to avoid any heavy i18n logic.
+"""
 
 DEFAULT_LANGUAGE = "English"
 
@@ -149,6 +152,9 @@ LANGUAGE_MAP = {
 
 def translate_text(language, key):
     """Return the translated text for the provided key."""
+    # Grab English as the fallback.
     base = LANGUAGE_MAP.get(DEFAULT_LANGUAGE, {})
+    # Choose the requested language or fall back if missing.
     table = LANGUAGE_MAP.get(language, base)
+    # Return the best available string (key itself if totally missing).
     return table.get(key, base.get(key, key))

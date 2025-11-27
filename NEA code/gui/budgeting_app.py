@@ -1,6 +1,7 @@
-# Smart Budgeting System - Main Application GUI
-# Author: Sathvik Devireddy
-# Main Application Interface
+"""
+Main Tkinter interface for the Smart Budgeting System.
+Logic stays the same, but comments explain the flow in a simple way.
+"""
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -16,9 +17,10 @@ from gui.translations import DEFAULT_LANGUAGE, LANGUAGE_MAP, translate_text
 
 
 class BudgetingApp:
-    """Main Application Interface"""
+    """Main Application Interface for all tabs and windows."""
     
     def __init__(self, root, system):
+        """Set up the main window, menus, and initial data."""
         self.root = root
         self.system = system
         self.root.title("Smart Budgeting System")
@@ -37,25 +39,26 @@ class BudgetingApp:
         self.goal_ring_has_goal = False
         self.nav_style_initialized = False
         
-        # Store reference to db for direct access
+        # Store reference to db for direct access.
         self.db = system.db
         
-        # Session monitoring
+        # Session monitoring (auto lock after timeout).
         self.last_activity = time.time()
         self.session_timeout = 900  # 15 minutes
         self._monitor_session()
         
+        # Build all UI pieces.
         self._create_hamburger_menu()
         self.create_menu()
         self.create_main_interface()
         self.apply_language_to_ui(self.current_language)
         self.root.bind("<Configure>", self._lift_overlay_elements)
         
-        # Refresh data
+        # Load data once the UI is ready.
         self.refresh_data()
 
     def _configure_notebook_style(self):
-        """Create a bold navigation tab style for the main menus"""
+        """Create a bold navigation tab style for the main menus."""
         if self.nav_style_initialized:
             return
         style = ttk.Style(self.root)
