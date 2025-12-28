@@ -42,6 +42,9 @@ class BudgetingSystem:
         # Stop duplicate usernames or emails.
         if self.db.get_user_by_username(username):
             return False, "Username already exists"
+        is_valid, message = self.security.validate_email_format(email)
+        if not is_valid:
+            return False, message
         if self.db.get_user_by_email(email):
             return False, "Email already registered"
         

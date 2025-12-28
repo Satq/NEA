@@ -4,6 +4,7 @@ Written in a simple, student-friendly style without changing behaviour.
 """
 
 import hashlib
+import re
 import secrets
 import string
 
@@ -45,6 +46,14 @@ class SecurityManager:
         if not any(char in string.punctuation for char in password):
             return False, "Password must contain special character"
         return True, "Password is strong"
+
+    @staticmethod
+    def validate_email_format(email):
+        """Check that an email looks like user@domain.com."""
+        pattern = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+        if not re.match(pattern, email):
+            return False, "Email must be in the form user@domain.com"
+        return True, "Email is valid"
 
     @staticmethod
     def password_in_history(password, history_records):
