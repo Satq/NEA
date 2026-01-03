@@ -19,6 +19,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+test.py
+test2.py
 
 # Database files
 *.db
@@ -49,4 +51,3 @@ backups/
 *.pdf
 *.csv
 !requirements.csv
-

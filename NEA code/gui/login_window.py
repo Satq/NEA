@@ -13,12 +13,14 @@ class LoginWindow:
     def __init__(self, root, system):
         self.root = root
         self.system = system
+        self.original_theme = ttk.Style(self.root).theme_use()
         self.root.title("Smart Budgeting System - Login")
         self.root.geometry("820x520")
         self.root.minsize(780, 500)
         self.root.configure(bg="#f2f2f2")
         self._configure_styles()
         
+        self.login_in_progress = False
         self.create_widgets()
 
     def _configure_styles(self):
@@ -123,10 +125,12 @@ class LoginWindow:
         button_bar.columnconfigure(0, weight=1)
         button_bar.columnconfigure(1, weight=1)
 
-        ttk.Button(button_bar, text="Login", style="Primary.TButton", command=self.login).grid(
+        self.login_button = ttk.Button(button_bar, text="Login", style="Primary.TButton", command=self.login)
+        self.login_button.grid(
             row=0, column=0, sticky="ew", padx=(0, 8)
         )
-        ttk.Button(button_bar, text="Create Account", style="Ghost.TButton", command=self.show_register).grid(
+        self.register_button = ttk.Button(button_bar, text="Create Account", style="Ghost.TButton", command=self.show_register)
+        self.register_button.grid(
             row=0, column=1, sticky="ew", padx=(8, 0)
         )
 
@@ -136,6 +140,8 @@ class LoginWindow:
     
     def login(self):
         """Handle login"""
+        if self.login_in_progress:
+            return
         username = self.username_entry.get()
         password = self.password_entry.get()
         
@@ -146,15 +152,30 @@ class LoginWindow:
         success, message = self.system.login(username, password)
         
         if success:
-            self.root.destroy()
-            # Launch main app - import here to avoid circular import
-            from gui.budgeting_app import BudgetingApp
-            
-            root = tk.Tk()
-            app = BudgetingApp(root, self.system)
-            root.mainloop()
+            self.login_in_progress = True
+            self.status_label.config(text="Login successful. Opening dashboard...", foreground="#111111")
+            self.login_button.state(["disabled"])
+            self.register_button.state(["disabled"])
+            self.root.after(3000, self._complete_login)
         else:
             self.status_label.config(text=message, foreground="#111111")
+
+    def _complete_login(self):
+        """Finish login after delay."""
+        if not self.root.winfo_exists():
+            return
+        app_root = self.root.master if isinstance(self.root, tk.Toplevel) and self.root.master else self.root
+        self.root.destroy()
+        # Launch main app - import here to avoid circular import
+        from gui.budgeting_app import BudgetingApp
+
+        app_root.deiconify()
+        style = ttk.Style(app_root)
+        try:
+            style.theme_use(self.original_theme)
+        except tk.TclError:
+            pass
+        BudgetingApp(app_root, self.system)
     
     def show_register(self):
         """Show registration dialog"""

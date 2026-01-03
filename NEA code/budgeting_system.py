@@ -1,6 +1,5 @@
 """
 Business logic for the Smart Budgeting System.
-This file keeps all behaviours the same but adds simple, student-style comments.
 """
 
 import datetime
@@ -70,10 +69,46 @@ class BudgetingSystem:
         user = self.db.get_user_by_username(username)
         if not user:
             return False, "Invalid username or password"
+
+        failed_attempts = user[6] if len(user) > 6 and user[6] is not None else 0
+        lockout_value = user[7] if len(user) > 7 else None
+        now = datetime.datetime.now()
+
+        # Block login attempts if the account is currently locked.
+        if lockout_value:
+            try:
+                lockout_until = datetime.datetime.strptime(lockout_value, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                lockout_until = None
+            if lockout_until and lockout_until > now:
+                remaining = lockout_until - now
+                minutes = max(1, int(remaining.total_seconds() // 60) or 1)
+                return False, f"Account is locked. Try again in approximately {minutes} minute(s)."
+            elif lockout_value:
+                # Lockout expired, reset counters.
+                self.db.reset_lockout(user[0])
+                failed_attempts = 0
         
         # Verify password using stored hash and salt (index 4 and 3).
         if not self.security.verify_password(password, user[4], user[3]):
-            return False, "Invalid username or password"
+            failed_attempts += 1
+            if failed_attempts >= self.password_attempt_limit:
+                lockout_until = now + datetime.timedelta(minutes=self.password_lock_minutes)
+                self.db.set_lockout(
+                    user[0],
+                    lockout_until.strftime("%Y-%m-%d %H:%M:%S"),
+                    failed_attempts
+                )
+                return False, (
+                    f"Too many failed attempts. Account locked for {self.password_lock_minutes} minutes."
+                )
+            self.db.update_failed_attempts(user[0], failed_attempts)
+            remaining_attempts = self.password_attempt_limit - failed_attempts
+            return False, (
+                f"Invalid username or password. {remaining_attempts} attempt(s) remaining before lockout."
+            )
+        elif failed_attempts:
+            self.db.reset_lockout(user[0])
         
         # Save login info and create a new session token.
         self.current_user_id = user[0]
