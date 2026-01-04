@@ -38,6 +38,19 @@ class BudgetingApp:
         self.account_window = None
         self.goal_ring_has_goal = False
         self.nav_style_initialized = False
+        self.dashboard_date_range = None
+        self.category_date_range = None
+        self.category_tabs = {}
+        self.category_palette = [
+            "#4c78a8",
+            "#f58518",
+            "#54a24b",
+            "#e45756",
+            "#72b7b2",
+            "#f2cf5b",
+            "#b279a2",
+            "#ff9da6"
+        ]
         
         # Store reference to db for direct access.
         self.db = system.db
@@ -298,6 +311,8 @@ class BudgetingApp:
             self.notebook.tab(self.budgets_frame, text=self._t("budgets_tab"))
             self.notebook.tab(self.goals_frame, text=self._t("goals_tab"))
             self.notebook.tab(self.reports_frame, text=self._t("reports_tab"))
+        if hasattr(self, "categories_title"):
+            self.categories_title.config(text=self._t("categories_tab"))
         if hasattr(self, "overall_frame"):
             self.overall_frame.config(text=self._t("overall_budget"))
         if hasattr(self, "spending_frame"):
@@ -767,6 +782,8 @@ class BudgetingApp:
             command=lambda: self.navigate_transactions("view")
         )
         self.quick_action_buttons["view"].grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+
+        self._bind_dashboard_category_navigation()
     
     def navigate_transactions(self, action):
         """Jump to the transactions tab focused on the requested action"""
@@ -776,6 +793,27 @@ class BudgetingApp:
             self.trans_desc_entry.focus_set()
         elif hasattr(self, "transactions_tree"):
             self.transactions_tree.focus_set()
+
+    def _bind_dashboard_category_navigation(self):
+        """Make dashboard charts clickable to jump to categories."""
+        if hasattr(self, "spending_canvas"):
+            spending_widget = self.spending_canvas.get_tk_widget()
+            spending_widget.configure(cursor="hand2")
+            spending_widget.bind("<Button-1>", lambda event: self.navigate_categories_tab("spending"))
+        if hasattr(self, "income_canvas"):
+            income_widget = self.income_canvas.get_tk_widget()
+            income_widget.configure(cursor="hand2")
+            income_widget.bind("<Button-1>", lambda event: self.navigate_categories_tab("income"))
+
+    def navigate_categories_tab(self, tab_key="spending"):
+        """Jump to the categories tab and select the requested sub-view."""
+        if hasattr(self, "notebook"):
+            self.notebook.select(self.categories_frame)
+        if self.dashboard_date_range:
+            self.category_date_range = self.dashboard_date_range
+        if hasattr(self, "categories_notebook") and tab_key in self.category_tabs:
+            self.categories_notebook.select(self.category_tabs[tab_key]["frame"])
+        self.refresh_category_charts()
     
     def create_transactions_tab(self):
         """Create transactions management interface"""
@@ -880,43 +918,85 @@ class BudgetingApp:
     
     def create_categories_tab(self):
         """Create categories management interface"""
+        self.categories_frame.columnconfigure(0, weight=3)
+        self.categories_frame.columnconfigure(1, weight=1)
+        self.categories_frame.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(self.categories_frame, padding=(5, 8))
+        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        header.columnconfigure(0, weight=1)
+
+        self.categories_title = tk.Label(
+            header,
+            text=self._t("categories_tab"),
+            font=("Helvetica Neue", 22, "bold")
+        )
+        self.categories_title.grid(row=0, column=0, sticky="w")
+
+        self.categories_period_label = ttk.Label(header, text="", font=("Helvetica", 11))
+        self.categories_period_label.grid(row=1, column=0, sticky="w")
+
+        analytics_panel = ttk.Frame(self.categories_frame, padding=10)
+        analytics_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
+        analytics_panel.columnconfigure(0, weight=1)
+        analytics_panel.rowconfigure(0, weight=1)
+
+        self.categories_notebook = ttk.Notebook(analytics_panel)
+        self.categories_notebook.grid(row=0, column=0, sticky="nsew")
+
+        self.category_tabs = {}
+        self.category_tabs["spending"] = self._build_category_analytics_tab(
+            self.categories_notebook,
+            "Spending by Category"
+        )
+        self.category_tabs["income"] = self._build_category_analytics_tab(
+            self.categories_notebook,
+            "Income by Category"
+        )
+
+        management_panel = ttk.Frame(self.categories_frame, padding=10)
+        management_panel.grid(row=1, column=1, sticky="nsew")
+        management_panel.columnconfigure(0, weight=1)
+
         # Add Category Frame
-        add_frame = ttk.LabelFrame(self.categories_frame, text="Add Category", padding=10)
-        add_frame.pack(fill="x", pady=5)
-        
+        add_frame = ttk.LabelFrame(management_panel, text="Add Category", padding=10)
+        add_frame.pack(fill="x", pady=(0, 10))
+
         ttk.Label(add_frame, text="Name:").grid(row=0, column=0, sticky="w", pady=5)
-        self.category_name_entry = ttk.Entry(add_frame, width=30)
+        self.category_name_entry = ttk.Entry(add_frame, width=26)
         self.category_name_entry.grid(row=0, column=1, pady=5, padx=5)
-        
+
         ttk.Label(add_frame, text="Type:").grid(row=1, column=0, sticky="w", pady=5)
-        self.category_type_combo = ttk.Combobox(add_frame, values=["income", "expense"], width=27, state="readonly")
+        self.category_type_combo = ttk.Combobox(add_frame, values=["income", "expense"], width=23, state="readonly")
         self.category_type_combo.grid(row=1, column=1, pady=5, padx=5)
         self.category_type_combo.set("expense")
-        
+
         ttk.Label(add_frame, text="Parent Category (optional):").grid(row=2, column=0, sticky="w", pady=5)
-        self.parent_category_combo = ttk.Combobox(add_frame, width=27, state="readonly")
+        self.parent_category_combo = ttk.Combobox(add_frame, width=23, state="readonly")
         self.parent_category_combo.grid(row=2, column=1, pady=5, padx=5)
-        
-        ttk.Button(add_frame, text="Add Category", command=self.add_category).grid(row=3, column=0, columnspan=2, pady=10)
-        
+
+        ttk.Button(add_frame, text="Add Category", command=self.add_category).grid(
+            row=3, column=0, columnspan=2, pady=10
+        )
+
         # Categories list
-        list_frame = ttk.LabelFrame(self.categories_frame, text="Categories", padding=10)
-        list_frame.pack(fill="both", expand=True, pady=5)
-        
+        list_frame = ttk.LabelFrame(management_panel, text="Categories", padding=10)
+        list_frame.pack(fill="both", expand=True)
+
         # Treeview for categories
-        self.categories_tree = ttk.Treeview(list_frame, columns=('ID', 'Name', 'Type', 'Parent'), height=15)
+        self.categories_tree = ttk.Treeview(list_frame, columns=('ID', 'Name', 'Type', 'Parent'), height=10)
         self.categories_tree.pack(fill="both", expand=True)
-        
+
         self.categories_tree.heading('ID', text='ID')
         self.categories_tree.heading('Name', text='Name')
         self.categories_tree.heading('Type', text='Type')
         self.categories_tree.heading('Parent', text='Parent')
-        
-        self.categories_tree.column('ID', width=50, anchor='center')
-        self.categories_tree.column('Name', width=200)
-        self.categories_tree.column('Type', width=100, anchor='center')
-        self.categories_tree.column('Parent', width=150)
-        
+
+        self.categories_tree.column('ID', width=40, anchor='center')
+        self.categories_tree.column('Name', width=150)
+        self.categories_tree.column('Type', width=80, anchor='center')
+        self.categories_tree.column('Parent', width=120)
+
         # Bind interactions
         self.categories_tree.bind("<Double-1>", self.edit_category)
         self.categories_menu = tk.Menu(self.categories_tree, tearoff=0)
@@ -926,6 +1006,106 @@ class BudgetingApp:
             "<Button-3>",
             lambda event: self._show_tree_context_menu(event, self.categories_tree, self.categories_menu)
         )
+
+        actions_frame = ttk.Frame(management_panel)
+        actions_frame.pack(fill="x", pady=(10, 0))
+        actions_frame.columnconfigure(0, weight=1)
+        actions_frame.columnconfigure(1, weight=1)
+
+        ttk.Button(actions_frame, text="Edit Category", command=self.edit_category).grid(
+            row=0, column=0, sticky="ew", padx=2, pady=2
+        )
+        ttk.Button(actions_frame, text="Delete Category", command=self.delete_category).grid(
+            row=0, column=1, sticky="ew", padx=2, pady=2
+        )
+        ttk.Button(actions_frame, text="View Spending", command=lambda: self.navigate_categories_tab("spending")).grid(
+            row=1, column=0, sticky="ew", padx=2, pady=(6, 2)
+        )
+        ttk.Button(actions_frame, text="View Income", command=lambda: self.navigate_categories_tab("income")).grid(
+            row=1, column=1, sticky="ew", padx=2, pady=(6, 2)
+        )
+
+    def _build_category_analytics_tab(self, notebook, tab_title):
+        """Create a donut-focused analytics tab for category breakdowns."""
+        tab = ttk.Frame(notebook, padding=10)
+        notebook.add(tab, text=tab_title)
+        tab.columnconfigure(0, weight=3)
+        tab.columnconfigure(1, weight=2)
+        tab.rowconfigure(0, weight=1)
+
+        chart_card = tk.Frame(tab, bg="white", highlightbackground="#d6d6d6", highlightthickness=1)
+        chart_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12), pady=4)
+        chart_card.columnconfigure(0, weight=1)
+        chart_card.rowconfigure(1, weight=1)
+
+        chart_title = tk.Label(
+            chart_card,
+            text=tab_title,
+            bg="white",
+            font=("Helvetica Neue", 14, "bold")
+        )
+        chart_title.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+
+        fig, ax = plt.subplots(figsize=(5.6, 4.4))
+        fig.patch.set_facecolor("white")
+        fig.subplots_adjust(left=0.04, right=0.96, top=0.95, bottom=0.05)
+        canvas = FigureCanvasTkAgg(fig, master=chart_card)
+        canvas_widget = canvas.get_tk_widget()
+        canvas_widget.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        canvas_widget.configure(bg="white", highlightthickness=0)
+
+        stats_card = tk.Frame(tab, bg="white", highlightbackground="#d6d6d6", highlightthickness=1)
+        stats_card.grid(row=0, column=1, sticky="nsew", pady=4)
+        stats_card.columnconfigure(0, weight=1)
+        stats_card.rowconfigure(2, weight=1)
+
+        stats_title = tk.Label(
+            stats_card,
+            text="Category Breakdown",
+            bg="white",
+            font=("Helvetica Neue", 12, "bold")
+        )
+        stats_title.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+
+        summary_label = tk.Label(
+            stats_card,
+            text="",
+            bg="white",
+            fg="#555555",
+            font=("Helvetica", 10)
+        )
+        summary_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 6))
+
+        stats_container = ttk.Frame(stats_card)
+        stats_container.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        stats_container.columnconfigure(0, weight=1)
+        stats_container.rowconfigure(0, weight=1)
+
+        stats_tree = ttk.Treeview(
+            stats_container,
+            columns=("Category", "Share", "Amount"),
+            show="headings",
+            height=12
+        )
+        stats_tree.heading("Category", text="Category")
+        stats_tree.heading("Share", text="Share")
+        stats_tree.heading("Amount", text="Amount")
+        stats_tree.column("Category", width=160, anchor="w")
+        stats_tree.column("Share", width=70, anchor="center")
+        stats_tree.column("Amount", width=90, anchor="e")
+
+        stats_scroll = ttk.Scrollbar(stats_container, orient="vertical", command=stats_tree.yview)
+        stats_tree.configure(yscrollcommand=stats_scroll.set)
+        stats_tree.grid(row=0, column=0, sticky="nsew")
+        stats_scroll.grid(row=0, column=1, sticky="ns")
+
+        return {
+            "frame": tab,
+            "ax": ax,
+            "canvas": canvas,
+            "stats_tree": stats_tree,
+            "summary_label": summary_label
+        }
     
     def create_budgets_tab(self):
         """Create budgets management interface"""
@@ -1072,10 +1252,149 @@ class BudgetingApp:
         
         self.report_text = tk.Text(self.report_display, height=20, width=80)
         self.report_text.pack(fill="both", expand=True, padx=10, pady=5)
+
+    def _format_currency(self, amount):
+        """Format a currency value for display."""
+        return f"£{amount:.2f}"
+
+    def _format_date_range_label(self, start_date, end_date):
+        """Format the active date range for the categories header."""
+        if not start_date or not end_date:
+            return "Period: All time"
+        start_label = start_date.strftime("%d %b %Y")
+        end_label = end_date.strftime("%d %b %Y")
+        return f"Period: {start_label} - {end_label}"
+
+    def _get_category_date_range(self):
+        """Return the active date range for category analytics."""
+        if self.category_date_range:
+            return self.category_date_range
+        if self.dashboard_date_range:
+            return self.dashboard_date_range
+        return (None, None)
+
+    def _get_category_transactions(self):
+        """Fetch transactions within the active category date range."""
+        start_date, end_date = self._get_category_date_range()
+        if start_date and end_date:
+            return self.system.get_transactions(
+                start_date.strftime("%Y-%m-%d"),
+                end_date.strftime("%Y-%m-%d")
+            )
+        return self.system.get_transactions()
+
+    def _build_category_totals(self, transactions):
+        """Aggregate transaction totals by category and type."""
+        totals = {"income": {}, "expense": {}}
+        for transaction in transactions:
+            category_name = self.get_category_name(transaction[2])
+            amount = transaction[5] or 0
+            trans_type = transaction[6]
+            if trans_type not in totals:
+                continue
+            totals[trans_type][category_name] = totals[trans_type].get(category_name, 0) + amount
+        return totals
+
+    def _render_category_donut(self, ax, labels, values, colors, center_label, total_value):
+        """Render a clean donut chart with a centered summary."""
+        ax.clear()
+        ax.set_aspect("equal")
+        if not values or total_value <= 0:
+            ax.axis("off")
+            ax.text(
+                0.5,
+                0.5,
+                "No data for this period",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=12,
+                color="#555555"
+            )
+            return
+
+        ax.pie(
+            values,
+            startangle=90,
+            colors=colors,
+            wedgeprops={"width": 0.35, "edgecolor": "white"}
+        )
+        inner_circle = Circle((0, 0), 0.55, color="white", zorder=3)
+        ax.add_patch(inner_circle)
+        ax.text(
+            0,
+            0.05,
+            self._format_currency(total_value),
+            ha="center",
+            va="center",
+            fontsize=16,
+            fontweight="bold"
+        )
+        ax.text(
+            0,
+            -0.15,
+            center_label,
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="#555555"
+        )
+
+    def _populate_category_stats(self, tree, labels, values, total_value):
+        """Populate the stats table for category breakdowns."""
+        for child in tree.get_children():
+            tree.delete(child)
+        if not values or total_value <= 0:
+            tree.insert("", "end", values=("No data yet", "", ""))
+            return
+        for label, value in zip(labels, values):
+            percentage = (value / total_value * 100) if total_value else 0
+            tree.insert(
+                "",
+                "end",
+                values=(label, f"{percentage:.1f}%", self._format_currency(value))
+            )
+
+    def _update_category_tab(self, tab_key, totals, center_label):
+        """Update a single category analytics tab with new data."""
+        tab = self.category_tabs.get(tab_key)
+        if not tab:
+            return
+        sorted_items = sorted(
+            [(name, value) for name, value in totals.items() if value > 0],
+            key=lambda item: item[1],
+            reverse=True
+        )
+        labels = [name for name, _ in sorted_items]
+        values = [value for _, value in sorted_items]
+        total_value = sum(values)
+        colors = [self.category_palette[i % len(self.category_palette)] for i in range(len(values))]
+        self._render_category_donut(tab["ax"], labels, values, colors, center_label, total_value)
+        tab["canvas"].draw()
+        self._populate_category_stats(tab["stats_tree"], labels, values, total_value)
+        if total_value > 0:
+            tab["summary_label"].config(
+                text=f"{len(labels)} categories • {self._format_currency(total_value)} total"
+            )
+        else:
+            tab["summary_label"].config(text="No data for this period")
+
+    def refresh_category_charts(self):
+        """Refresh category donut charts and stats."""
+        if not self.category_tabs:
+            return
+        transactions = self._get_category_transactions()
+        totals = self._build_category_totals(transactions)
+        self._update_category_tab("spending", totals["expense"], "Total Spending")
+        self._update_category_tab("income", totals["income"], "Total Income")
+        start_date, end_date = self._get_category_date_range()
+        if hasattr(self, "categories_period_label"):
+            self.categories_period_label.config(text=self._format_date_range_label(start_date, end_date))
     
     def refresh_data(self):
         """Refresh all data displays"""
         self.refresh_dashboard()
+        self.refresh_category_charts()
         self.refresh_transactions()
         self.refresh_categories()
         self.refresh_budgets()
@@ -1091,6 +1410,8 @@ class BudgetingApp:
             end_date = today.replace(year=today.year+1, month=1, day=1) - datetime.timedelta(days=1)
         else:
             end_date = today.replace(month=today.month+1, day=1) - datetime.timedelta(days=1)
+
+        self.dashboard_date_range = (start_date, end_date)
         
         transactions = self.system.get_transactions(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
         goals = self.system.get_goals()
@@ -1100,13 +1421,42 @@ class BudgetingApp:
         savings = income - expenses
         self.overall_summary.config(text=f"Income £{income:.2f} | Spending £{expenses:.2f} | Balance £{savings:.2f}")
         
-        # Overall donut chart using budgets or fallback to income/expense split
+        # Overall donut chart using budgets for the current month (fallback to income/expense)
         budgets = self.system.get_budgets()
         budget_totals = {}
+        total_budgeted = 0
+        total_spent = 0
+        spending_query = """
+            SELECT SUM(amount) FROM transactions
+            WHERE user_id = ? AND category_id = ?
+            AND date BETWEEN ? AND ?
+            AND type = 'expense'
+        """
         for budget in budgets:
-            cat_name = self.get_category_name(budget[2])
-            budget_totals[cat_name] = budget_totals.get(cat_name, 0) + budget[3]
-        
+            try:
+                budget_start = datetime.datetime.strptime(budget[4], "%Y-%m-%d").date()
+                budget_end = datetime.datetime.strptime(budget[5], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if budget_start <= end_date and budget_end >= start_date:
+                cat_name = self.get_category_name(budget[2])
+                budget_totals[cat_name] = budget_totals.get(cat_name, 0) + budget[3]
+                total_budgeted += budget[3]
+                period_start = max(budget_start, start_date)
+                period_end = min(budget_end, end_date)
+                spent = self.db.execute_query(
+                    spending_query,
+                    (
+                        self.system.current_user_id,
+                        budget[2],
+                        period_start.strftime("%Y-%m-%d"),
+                        period_end.strftime("%Y-%m-%d")
+                    ),
+                    fetch_one=True
+                )[0] or 0
+                total_spent += spent
+
+        using_budgets = bool(budget_totals)
         if not budget_totals and (income or expenses):
             budget_totals = {"Income": max(income, 0), "Expenses": max(expenses, 0)}
         
@@ -1122,7 +1472,15 @@ class BudgetingApp:
                 colors=colors,
                 wedgeprops={"width": 0.35, "edgecolor": "white"}
             )
-            self.overall_ax.text(0, 0, f"£{savings:.2f}\nBalance", ha="center", va="center", fontsize=12, weight="bold")
+            if using_budgets:
+                remaining = total_budgeted - total_spent
+                if remaining >= 0:
+                    center_text = f"£{remaining:.2f}\nRemaining"
+                else:
+                    center_text = f"£{abs(remaining):.2f}\nOver Budget"
+                self.overall_ax.text(0, 0, center_text, ha="center", va="center", fontsize=12, weight="bold")
+            else:
+                self.overall_ax.text(0, 0, f"£{savings:.2f}\nBalance", ha="center", va="center", fontsize=12, weight="bold")
             self.overall_ax.set_aspect('equal')
         else:
             self.overall_ax.axis('off')
