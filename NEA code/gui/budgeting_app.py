@@ -41,6 +41,15 @@ class BudgetingApp:
         self.dashboard_date_range = None
         self.category_date_range = None
         self.category_tabs = {}
+        self.budget_date_range = None
+        self.budget_overall_fig = None
+        self.budget_overall_ax = None
+        self.budget_overall_canvas = None
+        self.budget_left_stack = None
+        self.budget_right_stack = None
+        self.budget_left_canvas = None
+        self.budget_right_canvas = None
+        self.budget_small_figs = []
         self.category_palette = [
             "#4c78a8",
             "#f58518",
@@ -313,6 +322,8 @@ class BudgetingApp:
             self.notebook.tab(self.reports_frame, text=self._t("reports_tab"))
         if hasattr(self, "categories_title"):
             self.categories_title.config(text=self._t("categories_tab"))
+        if hasattr(self, "budgets_title"):
+            self.budgets_title.config(text=self._t("budgets_tab"))
         if hasattr(self, "overall_frame"):
             self.overall_frame.config(text=self._t("overall_budget"))
         if hasattr(self, "spending_frame"):
@@ -796,6 +807,10 @@ class BudgetingApp:
 
     def _bind_dashboard_category_navigation(self):
         """Make dashboard charts clickable to jump to categories."""
+        if hasattr(self, "overall_canvas"):
+            overall_widget = self.overall_canvas.get_tk_widget()
+            overall_widget.configure(cursor="hand2")
+            overall_widget.bind("<Button-1>", lambda event: self.navigate_budgets_tab())
         if hasattr(self, "spending_canvas"):
             spending_widget = self.spending_canvas.get_tk_widget()
             spending_widget.configure(cursor="hand2")
@@ -814,6 +829,14 @@ class BudgetingApp:
         if hasattr(self, "categories_notebook") and tab_key in self.category_tabs:
             self.categories_notebook.select(self.category_tabs[tab_key]["frame"])
         self.refresh_category_charts()
+
+    def navigate_budgets_tab(self):
+        """Jump to the budgets tab and refresh the charts."""
+        if hasattr(self, "notebook"):
+            self.notebook.select(self.budgets_frame)
+        if self.dashboard_date_range:
+            self.budget_date_range = self.dashboard_date_range
+        self.refresh_budget_charts()
     
     def create_transactions_tab(self):
         """Create transactions management interface"""
@@ -1029,8 +1052,8 @@ class BudgetingApp:
         """Create a donut-focused analytics tab for category breakdowns."""
         tab = ttk.Frame(notebook, padding=10)
         notebook.add(tab, text=tab_title)
-        tab.columnconfigure(0, weight=3)
-        tab.columnconfigure(1, weight=2)
+        tab.columnconfigure(0, weight=4, minsize=520)
+        tab.columnconfigure(1, weight=2, minsize=260)
         tab.rowconfigure(0, weight=1)
 
         chart_card = tk.Frame(tab, bg="white", highlightbackground="#d6d6d6", highlightthickness=1)
@@ -1054,105 +1077,193 @@ class BudgetingApp:
         canvas_widget.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
         canvas_widget.configure(bg="white", highlightthickness=0)
 
-        stats_card = tk.Frame(tab, bg="white", highlightbackground="#d6d6d6", highlightthickness=1)
+        stats_card = tk.Frame(tab, bg="#1f1f1f", highlightbackground="#d6d6d6", highlightthickness=1)
         stats_card.grid(row=0, column=1, sticky="nsew", pady=4)
+        stats_card.configure(width=260)
+        stats_card.grid_propagate(False)
         stats_card.columnconfigure(0, weight=1)
-        stats_card.rowconfigure(2, weight=1)
-
-        stats_title = tk.Label(
-            stats_card,
-            text="Category Breakdown",
-            bg="white",
-            font=("Helvetica Neue", 12, "bold")
-        )
-        stats_title.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+        stats_card.rowconfigure(1, weight=1)
 
         summary_label = tk.Label(
             stats_card,
             text="",
-            bg="white",
-            fg="#555555",
-            font=("Helvetica", 10)
+            bg="#1f1f1f",
+            fg="#e0e0e0",
+            font=("Segoe UI", 10, "bold")
         )
-        summary_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 6))
+        summary_label.grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
 
-        stats_container = ttk.Frame(stats_card)
-        stats_container.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
-        stats_container.columnconfigure(0, weight=1)
-        stats_container.rowconfigure(0, weight=1)
-
-        stats_tree = ttk.Treeview(
-            stats_container,
-            columns=("Category", "Share", "Amount"),
-            show="headings",
-            height=12
-        )
-        stats_tree.heading("Category", text="Category")
-        stats_tree.heading("Share", text="Share")
-        stats_tree.heading("Amount", text="Amount")
-        stats_tree.column("Category", width=160, anchor="w")
-        stats_tree.column("Share", width=70, anchor="center")
-        stats_tree.column("Amount", width=90, anchor="e")
-
-        stats_scroll = ttk.Scrollbar(stats_container, orient="vertical", command=stats_tree.yview)
-        stats_tree.configure(yscrollcommand=stats_scroll.set)
-        stats_tree.grid(row=0, column=0, sticky="nsew")
-        stats_scroll.grid(row=0, column=1, sticky="ns")
+        stats_table = tk.Frame(stats_card, bg="#1f1f1f")
+        stats_table.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 10))
+        stats_table.columnconfigure(0, weight=2)
+        stats_table.columnconfigure(1, weight=1)
+        stats_table.columnconfigure(2, weight=1)
 
         return {
             "frame": tab,
             "ax": ax,
             "canvas": canvas,
-            "stats_tree": stats_tree,
+            "stats_table": stats_table,
             "summary_label": summary_label
         }
+
+    def _create_budget_stack(self, parent):
+        """Create a scrollable stack for budget cards."""
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        inner = ttk.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=inner, anchor="n")
+
+        def on_inner_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def on_canvas_configure(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        inner.bind("<Configure>", on_inner_configure)
+        canvas.bind("<Configure>", on_canvas_configure)
+
+        return canvas, scrollbar, inner
     
     def create_budgets_tab(self):
         """Create budgets management interface"""
+        self.budgets_frame.columnconfigure(0, weight=3)
+        self.budgets_frame.columnconfigure(1, weight=1)
+        self.budgets_frame.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(self.budgets_frame, padding=(5, 8))
+        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        header.columnconfigure(0, weight=1)
+
+        self.budgets_title = tk.Label(
+            header,
+            text=self._t("budgets_tab"),
+            font=("Helvetica Neue", 22, "bold")
+        )
+        self.budgets_title.grid(row=0, column=0, sticky="w")
+
+        self.budgets_period_label = ttk.Label(header, text="", font=("Helvetica", 11))
+        self.budgets_period_label.grid(row=1, column=0, sticky="w")
+
+        visuals_panel = ttk.Frame(self.budgets_frame, padding=10)
+        visuals_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
+        visuals_panel.columnconfigure(0, weight=1)
+        visuals_panel.rowconfigure(0, weight=1)
+
+        self.budget_orbit_frame = ttk.Frame(visuals_panel)
+        self.budget_orbit_frame.grid(row=0, column=0, sticky="nsew")
+        self.budget_orbit_frame.columnconfigure(0, weight=1)
+        self.budget_orbit_frame.columnconfigure(1, weight=2)
+        self.budget_orbit_frame.columnconfigure(2, weight=1)
+        self.budget_orbit_frame.rowconfigure(0, weight=1)
+
+        left_column = ttk.Frame(self.budget_orbit_frame)
+        left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        left_column.columnconfigure(0, weight=1)
+        left_column.rowconfigure(0, weight=1)
+        self.budget_left_canvas, left_scroll, self.budget_left_stack = self._create_budget_stack(left_column)
+        self.budget_left_canvas.grid(row=0, column=0, sticky="nsew")
+        left_scroll.grid(row=0, column=1, sticky="ns")
+
+        center_card = tk.Frame(
+            self.budget_orbit_frame,
+            bg="white",
+            highlightbackground="#d6d6d6",
+            highlightthickness=1
+        )
+        center_card.grid(row=0, column=1, sticky="nsew", padx=10, pady=6)
+        center_card.columnconfigure(0, weight=1)
+        center_card.rowconfigure(1, weight=1)
+
+        center_title = tk.Label(
+            center_card,
+            text="Overall Budget",
+            bg="white",
+            font=("Helvetica Neue", 14, "bold")
+        )
+        center_title.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+
+        self.budget_overall_fig, self.budget_overall_ax = plt.subplots(figsize=(4.8, 4.2))
+        self.budget_overall_fig.patch.set_facecolor("white")
+        self.budget_overall_fig.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05)
+        self.budget_overall_canvas = FigureCanvasTkAgg(self.budget_overall_fig, master=center_card)
+        overall_widget = self.budget_overall_canvas.get_tk_widget()
+        overall_widget.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        overall_widget.configure(bg="white", highlightthickness=0)
+
+        self.budget_overall_summary = tk.Label(
+            center_card,
+            text="",
+            bg="white",
+            fg="#555555",
+            font=("Helvetica", 10)
+        )
+        self.budget_overall_summary.grid(row=2, column=0, sticky="w", padx=12, pady=(0, 10))
+
+        right_column = ttk.Frame(self.budget_orbit_frame)
+        right_column.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+        right_column.columnconfigure(0, weight=1)
+        right_column.rowconfigure(0, weight=1)
+        self.budget_right_canvas, right_scroll, self.budget_right_stack = self._create_budget_stack(right_column)
+        self.budget_right_canvas.grid(row=0, column=0, sticky="nsew")
+        right_scroll.grid(row=0, column=1, sticky="ns")
+
+        management_panel = ttk.Frame(self.budgets_frame, padding=10)
+        management_panel.grid(row=1, column=1, sticky="nsew")
+        management_panel.columnconfigure(0, weight=1)
+
         # Add Budget Frame
-        add_frame = ttk.LabelFrame(self.budgets_frame, text="Add Budget", padding=10)
-        add_frame.pack(fill="x", pady=5)
-        
+        add_frame = ttk.LabelFrame(management_panel, text="Add Budget", padding=10)
+        add_frame.pack(fill="x", pady=(0, 10))
+
         ttk.Label(add_frame, text="Category:").grid(row=0, column=0, sticky="w", pady=5)
-        self.budget_category_combo = ttk.Combobox(add_frame, width=30, state="readonly")
+        self.budget_category_combo = ttk.Combobox(add_frame, width=24, state="readonly")
         self.budget_category_combo.grid(row=0, column=1, pady=5, padx=5)
-        
+
         ttk.Label(add_frame, text="Limit Amount:").grid(row=1, column=0, sticky="w", pady=5)
-        self.budget_limit_entry = ttk.Entry(add_frame, width=20)
+        self.budget_limit_entry = ttk.Entry(add_frame, width=18)
         self.budget_limit_entry.grid(row=1, column=1, pady=5, padx=5)
-        
+
         ttk.Label(add_frame, text="Start Date:").grid(row=2, column=0, sticky="w", pady=5)
-        self.budget_start_entry = ttk.Entry(add_frame, width=20)
+        self.budget_start_entry = ttk.Entry(add_frame, width=18)
         self.budget_start_entry.grid(row=2, column=1, pady=5, padx=5)
         self.budget_start_entry.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
-        
+
         ttk.Label(add_frame, text="End Date:").grid(row=3, column=0, sticky="w", pady=5)
-        self.budget_end_entry = ttk.Entry(add_frame, width=20)
+        self.budget_end_entry = ttk.Entry(add_frame, width=18)
         self.budget_end_entry.grid(row=3, column=1, pady=5, padx=5)
-        
-        ttk.Button(add_frame, text="Add Budget", command=self.add_budget).grid(row=4, column=0, columnspan=2, pady=10)
-        
+
+        ttk.Button(add_frame, text="Add Budget", command=self.add_budget).grid(
+            row=4, column=0, columnspan=2, pady=10
+        )
+
         # Budgets list
-        list_frame = ttk.LabelFrame(self.budgets_frame, text="Active Budgets", padding=10)
-        list_frame.pack(fill="both", expand=True, pady=5)
-        
-        self.budgets_tree = ttk.Treeview(list_frame, columns=('ID', 'Category', 'Limit', 'Spent', 'Remaining', 'Progress'), height=15)
+        list_frame = ttk.LabelFrame(management_panel, text="Active Budgets", padding=10)
+        list_frame.pack(fill="both", expand=True)
+
+        self.budgets_tree = ttk.Treeview(
+            list_frame,
+            columns=('ID', 'Category', 'Limit', 'Spent', 'Remaining', 'Progress'),
+            height=10
+        )
         self.budgets_tree.pack(fill="both", expand=True)
-        
+
         self.budgets_tree.heading('ID', text='ID')
         self.budgets_tree.heading('Category', text='Category')
         self.budgets_tree.heading('Limit', text='Limit')
         self.budgets_tree.heading('Spent', text='Spent')
         self.budgets_tree.heading('Remaining', text='Remaining')
         self.budgets_tree.heading('Progress', text='Progress %')
-        
-        self.budgets_tree.column('ID', width=50, anchor='center')
-        self.budgets_tree.column('Category', width=150)
-        self.budgets_tree.column('Limit', width=100, anchor='e')
-        self.budgets_tree.column('Spent', width=100, anchor='e')
-        self.budgets_tree.column('Remaining', width=100, anchor='e')
-        self.budgets_tree.column('Progress', width=80, anchor='center')
-        
+
+        self.budgets_tree.column('ID', width=40, anchor='center')
+        self.budgets_tree.column('Category', width=120)
+        self.budgets_tree.column('Limit', width=90, anchor='e')
+        self.budgets_tree.column('Spent', width=90, anchor='e')
+        self.budgets_tree.column('Remaining', width=90, anchor='e')
+        self.budgets_tree.column('Progress', width=70, anchor='center')
+
         self.budgets_tree.bind("<Double-1>", self.edit_budget)
         self.budgets_menu = tk.Menu(self.budgets_tree, tearoff=0)
         self.budgets_menu.add_command(label="Edit Budget", command=self.edit_budget)
@@ -1160,6 +1271,18 @@ class BudgetingApp:
         self.budgets_tree.bind(
             "<Button-3>",
             lambda event: self._show_tree_context_menu(event, self.budgets_tree, self.budgets_menu)
+        )
+
+        actions_frame = ttk.Frame(management_panel)
+        actions_frame.pack(fill="x", pady=(10, 0))
+        actions_frame.columnconfigure(0, weight=1)
+        actions_frame.columnconfigure(1, weight=1)
+
+        ttk.Button(actions_frame, text="Edit Budget", command=self.edit_budget).grid(
+            row=0, column=0, sticky="ew", padx=2, pady=2
+        )
+        ttk.Button(actions_frame, text="Delete Budget", command=self.delete_budget).grid(
+            row=0, column=1, sticky="ew", padx=2, pady=2
         )
     
     def create_goals_tab(self):
@@ -1317,6 +1440,9 @@ class BudgetingApp:
             values,
             startangle=90,
             colors=colors,
+            labels=labels,
+            labeldistance=1.08,
+            textprops={"fontsize": 8},
             wedgeprops={"width": 0.35, "edgecolor": "white"}
         )
         inner_circle = Circle((0, 0), 0.55, color="white", zorder=3)
@@ -1340,20 +1466,57 @@ class BudgetingApp:
             color="#555555"
         )
 
-    def _populate_category_stats(self, tree, labels, values, total_value):
+    def _populate_category_stats(self, table, labels, values, total_value):
         """Populate the stats table for category breakdowns."""
-        for child in tree.get_children():
-            tree.delete(child)
+        for child in table.winfo_children():
+            child.destroy()
+        header_bg = "#2a2a2a"
+        row_bg = "#1f1f1f"
+        headings = ["Category", "Share", "Amount"]
+        for col, text in enumerate(headings):
+            tk.Label(
+                table,
+                text=text,
+                bg=header_bg,
+                fg="#ffffff",
+                font=("Segoe UI", 9, "bold")
+            ).grid(row=0, column=col, sticky="ew", padx=1, pady=(0, 2))
         if not values or total_value <= 0:
-            tree.insert("", "end", values=("No data yet", "", ""))
+            tk.Label(
+                table,
+                text="No data yet",
+                bg=row_bg,
+                fg="#e6e6e6",
+                font=("Segoe UI", 9),
+                anchor="w"
+            ).grid(row=1, column=0, columnspan=3, sticky="ew", padx=4, pady=4)
             return
-        for label, value in zip(labels, values):
+        for row_idx, (label, value) in enumerate(zip(labels, values), start=1):
             percentage = (value / total_value * 100) if total_value else 0
-            tree.insert(
-                "",
-                "end",
-                values=(label, f"{percentage:.1f}%", self._format_currency(value))
-            )
+            tk.Label(
+                table,
+                text=label,
+                bg=row_bg,
+                fg="#e6e6e6",
+                font=("Segoe UI", 9),
+                anchor="w"
+            ).grid(row=row_idx, column=0, sticky="ew", padx=1, pady=1)
+            tk.Label(
+                table,
+                text=f"{percentage:.1f}%",
+                bg=row_bg,
+                fg="#e6e6e6",
+                font=("Segoe UI", 9),
+                anchor="center"
+            ).grid(row=row_idx, column=1, sticky="ew", padx=1, pady=1)
+            tk.Label(
+                table,
+                text=self._format_currency(value),
+                bg=row_bg,
+                fg="#e6e6e6",
+                font=("Segoe UI", 9),
+                anchor="e"
+            ).grid(row=row_idx, column=2, sticky="ew", padx=1, pady=1)
 
     def _update_category_tab(self, tab_key, totals, center_label):
         """Update a single category analytics tab with new data."""
@@ -1371,7 +1534,7 @@ class BudgetingApp:
         colors = [self.category_palette[i % len(self.category_palette)] for i in range(len(values))]
         self._render_category_donut(tab["ax"], labels, values, colors, center_label, total_value)
         tab["canvas"].draw()
-        self._populate_category_stats(tab["stats_tree"], labels, values, total_value)
+        self._populate_category_stats(tab["stats_table"], labels, values, total_value)
         if total_value > 0:
             tab["summary_label"].config(
                 text=f"{len(labels)} categories • {self._format_currency(total_value)} total"
@@ -1390,6 +1553,296 @@ class BudgetingApp:
         start_date, end_date = self._get_category_date_range()
         if hasattr(self, "categories_period_label"):
             self.categories_period_label.config(text=self._format_date_range_label(start_date, end_date))
+
+    def _get_budget_date_range(self):
+        """Return the active date range for budget analytics."""
+        if self.budget_date_range:
+            return self.budget_date_range
+        if self.dashboard_date_range:
+            return self.dashboard_date_range
+        return (None, None)
+
+    def _get_active_budgets(self):
+        """Return budgets active within the selected date range."""
+        budgets = self.system.get_budgets()
+        if not budgets:
+            return []
+        start_date, end_date = self._get_budget_date_range()
+        active_budgets = []
+        for budget in budgets:
+            try:
+                budget_start = datetime.datetime.strptime(budget[4], "%Y-%m-%d").date()
+                budget_end = datetime.datetime.strptime(budget[5], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if start_date and end_date and budget_start and budget_end:
+                if budget_start > end_date or budget_end < start_date:
+                    continue
+            active_budgets.append(
+                {
+                    "id": budget[0],
+                    "category_id": budget[2],
+                    "limit": float(budget[3] or 0),
+                    "start": budget_start,
+                    "end": budget_end
+                }
+            )
+        return active_budgets
+
+    def _format_budget_label(self, name, budget_start, budget_end, budget_id, duplicates):
+        """Create a readable label for a budget slice."""
+        if name not in duplicates:
+            return name
+        if budget_start and budget_end:
+            return f"{name} ({budget_start.strftime('%b')} - {budget_end.strftime('%b')})"
+        return f"{name} (Budget {budget_id})"
+
+    def _get_budget_spent(self, budget):
+        """Calculate how much has been spent in a budget's active window."""
+        if not budget.get("start") or not budget.get("end"):
+            return 0.0
+        start_date, end_date = self._get_budget_date_range()
+        period_start = budget["start"]
+        period_end = budget["end"]
+        if start_date and end_date:
+            period_start = max(period_start, start_date)
+            period_end = min(period_end, end_date)
+        if period_start > period_end:
+            return 0.0
+        query = """
+            SELECT SUM(amount) FROM transactions
+            WHERE user_id = ? AND category_id = ?
+            AND date BETWEEN ? AND ?
+            AND type = 'expense'
+        """
+        spent = self.db.execute_query(
+            query,
+            (
+                self.system.current_user_id,
+                budget["category_id"],
+                period_start.strftime("%Y-%m-%d"),
+                period_end.strftime("%Y-%m-%d")
+            ),
+            fetch_one=True
+        )[0] or 0
+        return float(spent)
+
+    def _render_overall_budget_donut(self, totals):
+        """Render the overall budget donut chart."""
+        if not self.budget_overall_ax:
+            return
+        self.budget_overall_ax.clear()
+        self.budget_overall_ax.set_aspect("equal")
+        if not totals:
+            self.budget_overall_ax.axis("off")
+            self.budget_overall_ax.text(
+                0.5,
+                0.5,
+                "Add budgets to\nbuild your donut",
+                ha="center",
+                va="center",
+                transform=self.budget_overall_ax.transAxes,
+                fontsize=12,
+                color="#555555"
+            )
+            return
+        labels = [item["label"] for item in totals]
+        values = [item["limit"] for item in totals]
+        colors = [item["color"] for item in totals]
+        total_budget = sum(values)
+        if total_budget <= 0:
+            self.budget_overall_ax.axis("off")
+            self.budget_overall_ax.text(
+                0.5,
+                0.5,
+                "Budgets total\n£0.00",
+                ha="center",
+                va="center",
+                transform=self.budget_overall_ax.transAxes,
+                fontsize=12,
+                color="#555555"
+            )
+            return
+        self.budget_overall_ax.pie(
+            values,
+            labels=labels,
+            startangle=90,
+            colors=colors,
+            wedgeprops={"width": 0.35, "edgecolor": "white"}
+        )
+        self.budget_overall_ax.text(
+            0,
+            0.05,
+            self._format_currency(total_budget),
+            ha="center",
+            va="center",
+            fontsize=16,
+            fontweight="bold"
+        )
+        self.budget_overall_ax.text(
+            0,
+            -0.15,
+            "Total Budget",
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="#555555"
+        )
+
+    def _clear_budget_orbit(self):
+        """Remove previous budget charts and release figures."""
+        for fig in self.budget_small_figs:
+            plt.close(fig)
+        self.budget_small_figs = []
+        if self.budget_left_stack:
+            for child in self.budget_left_stack.winfo_children():
+                child.destroy()
+        if self.budget_left_canvas:
+            self.budget_left_canvas.yview_moveto(0)
+        if self.budget_right_stack:
+            for child in self.budget_right_stack.winfo_children():
+                child.destroy()
+        if self.budget_right_canvas:
+            self.budget_right_canvas.yview_moveto(0)
+
+    def _render_budget_share_card(self, parent, title, spent, limit_amount, color):
+        """Render a small budget progress donut card."""
+        card = tk.Frame(parent, bg="white", highlightbackground="#d6d6d6", highlightthickness=1)
+        card.pack(fill="x", pady=6)
+
+        fig, ax = plt.subplots(figsize=(2.4, 2.1))
+        fig.patch.set_facecolor("white")
+        ax.set_aspect("equal")
+        if limit_amount > 0:
+            remainder = max(limit_amount - spent, 0)
+            values = [min(spent, limit_amount), remainder]
+            ax.pie(
+                values,
+                startangle=90,
+                colors=[color, "#f0f0f0"],
+                wedgeprops={"width": 0.35, "edgecolor": "white"}
+            )
+            percentage = (spent / limit_amount) * 100
+            ax.text(
+                0,
+                0.05,
+                self._format_currency(spent),
+                ha="center",
+                va="center",
+                fontsize=8,
+                fontweight="bold"
+            )
+            ax.text(
+                0,
+                -0.15,
+                f"{percentage:.0f}%",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="#555555"
+            )
+        else:
+            ax.axis("off")
+            ax.text(
+                0.5,
+                0.5,
+                "0%",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=9,
+                color="#555555"
+            )
+        ax.axis("off")
+
+        canvas = FigureCanvasTkAgg(fig, master=card)
+        canvas_widget = canvas.get_tk_widget()
+        canvas_widget.pack(fill="x", padx=6, pady=(6, 2))
+        canvas_widget.configure(bg="white", highlightthickness=0)
+
+        label = tk.Label(
+            card,
+            text=f"{title}\n{self._format_currency(spent)} / {self._format_currency(limit_amount)}",
+            bg="white",
+            fg="#333333",
+            font=("Helvetica", 9),
+            justify="center"
+        )
+        label.pack(padx=6, pady=(0, 6))
+        return fig
+
+    def refresh_budget_charts(self):
+        """Refresh budget overview donut and surrounding charts."""
+        if not self.budget_overall_ax:
+            return
+        active_budgets = self._get_active_budgets()
+        if not active_budgets:
+            self._clear_budget_orbit()
+            self._render_overall_budget_donut([])
+            if self.budget_overall_canvas:
+                self.budget_overall_canvas.draw()
+            if hasattr(self, "budget_overall_summary"):
+                self.budget_overall_summary.config(text="No active budgets")
+            start_date, end_date = self._get_budget_date_range()
+            if hasattr(self, "budgets_period_label"):
+                self.budgets_period_label.config(text=self._format_date_range_label(start_date, end_date))
+            return
+
+        names = [self.get_category_name(budget["category_id"]) for budget in active_budgets]
+        name_counts = {name: names.count(name) for name in names}
+        duplicates = {name for name, count in name_counts.items() if count > 1}
+
+        totals = []
+        for index, budget in enumerate(active_budgets):
+            name = self.get_category_name(budget["category_id"])
+            label = self._format_budget_label(
+                name,
+                budget["start"],
+                budget["end"],
+                budget["id"],
+                duplicates
+            )
+            totals.append(
+                {
+                    "label": label,
+                    "limit": budget["limit"],
+                    "color": self.category_palette[index % len(self.category_palette)]
+                }
+            )
+
+        total_budget = sum(item["limit"] for item in totals)
+        self._render_overall_budget_donut(totals)
+        if self.budget_overall_canvas:
+            self.budget_overall_canvas.draw()
+        if hasattr(self, "budget_overall_summary"):
+            self.budget_overall_summary.config(
+                text=f"{len(active_budgets)} budgets • {self._format_currency(total_budget)} total"
+            )
+
+        self._clear_budget_orbit()
+        for index, budget in enumerate(active_budgets):
+            name = self.get_category_name(budget["category_id"])
+            label = self._format_budget_label(
+                name,
+                budget["start"],
+                budget["end"],
+                budget["id"],
+                duplicates
+            )
+            spent = self._get_budget_spent(budget)
+            target = self.budget_left_stack if index % 2 == 0 else self.budget_right_stack
+            fig = self._render_budget_share_card(
+                target,
+                label,
+                spent,
+                budget["limit"],
+                self.category_palette[index % len(self.category_palette)]
+            )
+            self.budget_small_figs.append(fig)
+
+        start_date, end_date = self._get_budget_date_range()
+        if hasattr(self, "budgets_period_label"):
+            self.budgets_period_label.config(text=self._format_date_range_label(start_date, end_date))
     
     def refresh_data(self):
         """Refresh all data displays"""
@@ -1456,10 +1909,6 @@ class BudgetingApp:
                 )[0] or 0
                 total_spent += spent
 
-        using_budgets = bool(budget_totals)
-        if not budget_totals and (income or expenses):
-            budget_totals = {"Income": max(income, 0), "Expenses": max(expenses, 0)}
-        
         self.overall_ax.clear()
         if budget_totals:
             labels = list(budget_totals.keys())
@@ -1472,15 +1921,12 @@ class BudgetingApp:
                 colors=colors,
                 wedgeprops={"width": 0.35, "edgecolor": "white"}
             )
-            if using_budgets:
-                remaining = total_budgeted - total_spent
-                if remaining >= 0:
-                    center_text = f"£{remaining:.2f}\nRemaining"
-                else:
-                    center_text = f"£{abs(remaining):.2f}\nOver Budget"
-                self.overall_ax.text(0, 0, center_text, ha="center", va="center", fontsize=12, weight="bold")
+            remaining = total_budgeted - total_spent
+            if remaining >= 0:
+                center_text = f"£{remaining:.2f}\nRemaining"
             else:
-                self.overall_ax.text(0, 0, f"£{savings:.2f}\nBalance", ha="center", va="center", fontsize=12, weight="bold")
+                center_text = f"£{abs(remaining):.2f}\nOver Budget"
+            self.overall_ax.text(0, 0, center_text, ha="center", va="center", fontsize=12, weight="bold")
             self.overall_ax.set_aspect('equal')
         else:
             self.overall_ax.axis('off')
@@ -1501,7 +1947,14 @@ class BudgetingApp:
         if spending_totals:
             labels = list(spending_totals.keys())
             values = list(spending_totals.values())
-            self.spending_ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
+            self.spending_ax.pie(
+                values,
+                labels=labels,
+                autopct='%1.1f%%',
+                startangle=90,
+                wedgeprops={"width": 0.35, "edgecolor": "white"}
+            )
+            self.spending_ax.set_aspect('equal')
             self.spending_ax.set_title("Spending Breakdown")
         else:
             self.spending_ax.axis('off')
@@ -1513,7 +1966,14 @@ class BudgetingApp:
         if income_totals:
             labels = list(income_totals.keys())
             values = list(income_totals.values())
-            self.income_ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
+            self.income_ax.pie(
+                values,
+                labels=labels,
+                autopct='%1.1f%%',
+                startangle=90,
+                wedgeprops={"width": 0.35, "edgecolor": "white"}
+            )
+            self.income_ax.set_aspect('equal')
             self.income_ax.set_title("Income Sources")
         else:
             self.income_ax.axis('off')
@@ -1660,6 +2120,8 @@ class BudgetingApp:
                 budget[0], cat_name, f"£{budget[3]:.2f}",
                 f"£{spent:.2f}", f"£{remaining:.2f}", f"{progress:.1f}%"
             ))
+
+        self.refresh_budget_charts()
     
     def refresh_goals(self):
         """Refresh goals list"""
