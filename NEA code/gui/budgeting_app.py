@@ -38,6 +38,14 @@ class BudgetingApp:
         self.account_window = None
         self.goal_ring_has_goal = False
         self.nav_style_initialized = False
+        self.active_goal_id = None
+        self.goal_option_map = {}
+        self.goal_selector_var = None
+        self.goal_selector_combo = None
+        self.goals_cards_canvas = None
+        self.goals_cards_frame = None
+        self.goal_card_figs = []
+        self.trans_goal_map = {}
         self.dashboard_date_range = None
         self.category_date_range = None
         self.category_tabs = {}
@@ -322,8 +330,14 @@ class BudgetingApp:
             self.notebook.tab(self.reports_frame, text=self._t("reports_tab"))
         if hasattr(self, "categories_title"):
             self.categories_title.config(text=self._t("categories_tab"))
+        if hasattr(self, "transactions_title"):
+            self.transactions_title.config(text=self._t("transactions_tab"))
+        if hasattr(self, "reports_title"):
+            self.reports_title.config(text=self._t("reports_tab"))
         if hasattr(self, "budgets_title"):
             self.budgets_title.config(text=self._t("budgets_tab"))
+        if hasattr(self, "goals_title"):
+            self.goals_title.config(text=self._t("goals_tab"))
         if hasattr(self, "overall_frame"):
             self.overall_frame.config(text=self._t("overall_budget"))
         if hasattr(self, "spending_frame"):
@@ -719,6 +733,23 @@ class BudgetingApp:
         )
         self.goal_ring_frame.grid(row=0, column=0, sticky="ew", pady=(0, 15))
         self.goal_ring_frame.columnconfigure(0, weight=1)
+        selector_frame = tk.Frame(self.goal_ring_frame, bg="white")
+        selector_frame.pack(fill="x", pady=(0, 6))
+        tk.Label(
+            selector_frame,
+            text="Viewing:",
+            font=("Helvetica", 10, "bold"),
+            bg="white"
+        ).pack(side="left")
+        self.goal_selector_var = tk.StringVar()
+        self.goal_selector_combo = ttk.Combobox(
+            selector_frame,
+            textvariable=self.goal_selector_var,
+            state="readonly",
+            width=16
+        )
+        self.goal_selector_combo.pack(side="left", padx=6)
+        self.goal_selector_combo.bind("<<ComboboxSelected>>", self._on_goal_selection)
         self.goal_ring_label = tk.Label(
             self.goal_ring_frame,
             text=self._t("current_goal"),
@@ -819,6 +850,10 @@ class BudgetingApp:
             income_widget = self.income_canvas.get_tk_widget()
             income_widget.configure(cursor="hand2")
             income_widget.bind("<Button-1>", lambda event: self.navigate_categories_tab("income"))
+        if hasattr(self, "goal_ring_canvas"):
+            goal_widget = self.goal_ring_canvas.get_tk_widget()
+            goal_widget.configure(cursor="hand2")
+            goal_widget.bind("<Button-1>", lambda event: self.navigate_goals_tab())
 
     def navigate_categories_tab(self, tab_key="spending"):
         """Jump to the categories tab and select the requested sub-view."""
@@ -837,80 +872,230 @@ class BudgetingApp:
         if self.dashboard_date_range:
             self.budget_date_range = self.dashboard_date_range
         self.refresh_budget_charts()
+
+    def navigate_goals_tab(self):
+        """Jump to the goals tab and refresh the cards."""
+        if hasattr(self, "notebook"):
+            self.notebook.select(self.goals_frame)
+        self.refresh_goals()
     
     def create_transactions_tab(self):
         """Create transactions management interface"""
-        # Input frame
-        input_frame = ttk.LabelFrame(self.transactions_frame, text="Add Transaction", padding=10)
-        input_frame.pack(fill="x", pady=5)
-        
+        surface_bg = "#2f2f2f"
+        surface_header_bg = "#3a3a3a"
+        surface_border = "#4a4a4a"
+        text_primary = "#f5f5f5"
+        text_muted = "#cfcfcf"
+
+        self.transactions_frame.columnconfigure(0, weight=1)
+        self.transactions_frame.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(self.transactions_frame, padding=(6, 10))
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+
+        self.transactions_title = tk.Label(
+            header,
+            text=self._t("transactions_tab"),
+            font=("Helvetica Neue", 22, "bold")
+        )
+        self.transactions_title.grid(row=0, column=0, sticky="w")
+
+        subtitle = ttk.Label(
+            header,
+            text="Record income, spending, and goal contributions in one place."
+        )
+        subtitle.configure(foreground=text_muted)
+        subtitle.grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+        content = ttk.Frame(self.transactions_frame, padding=10)
+        content.grid(row=1, column=0, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.columnconfigure(1, weight=2)
+        content.rowconfigure(0, weight=1)
+
+        form_card = tk.Frame(
+            content,
+            bg=surface_bg,
+            highlightbackground=surface_border,
+            highlightthickness=1
+        )
+        form_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        form_card.columnconfigure(0, weight=1)
+
+        form_title = tk.Label(
+            form_card,
+            text="New Transaction",
+            bg=surface_bg,
+            fg=text_primary,
+            font=("Helvetica Neue", 12, "bold")
+        )
+        form_title.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+
+        form_body = tk.Frame(form_card, bg=surface_bg)
+        form_body.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 8))
+        form_body.columnconfigure(1, weight=1)
+
         # Form fields
-        ttk.Label(input_frame, text="Date (YYYY-MM-DD):").grid(row=0, column=0, sticky="w", pady=5)
-        self.trans_date_entry = ttk.Entry(input_frame, width=20)
-        self.trans_date_entry.grid(row=0, column=1, pady=5, padx=5)
+        tk.Label(
+            form_body,
+            text="Date (YYYY-MM-DD):",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=0, column=0, sticky="w", pady=4)
+        self.trans_date_entry = ttk.Entry(form_body, width=20)
+        self.trans_date_entry.grid(row=0, column=1, sticky="ew", pady=4, padx=6)
         self.trans_date_entry.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
         
-        ttk.Label(input_frame, text="Description:").grid(row=1, column=0, sticky="w", pady=5)
-        self.trans_desc_entry = ttk.Entry(input_frame, width=40)
-        self.trans_desc_entry.grid(row=1, column=1, pady=5, padx=5)
+        tk.Label(
+            form_body,
+            text="Description:",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=1, column=0, sticky="w", pady=4)
+        self.trans_desc_entry = ttk.Entry(form_body, width=40)
+        self.trans_desc_entry.grid(row=1, column=1, sticky="ew", pady=4, padx=6)
         
-        ttk.Label(input_frame, text="Category:").grid(row=2, column=0, sticky="w", pady=5)
-        self.trans_category_combo = ttk.Combobox(input_frame, width=37, state="readonly")
-        self.trans_category_combo.grid(row=2, column=1, pady=5, padx=5)
+        tk.Label(
+            form_body,
+            text="Category:",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=2, column=0, sticky="w", pady=4)
+        self.trans_category_combo = ttk.Combobox(form_body, width=30, state="readonly")
+        self.trans_category_combo.grid(row=2, column=1, sticky="ew", pady=4, padx=6)
         
-        ttk.Label(input_frame, text="Amount:").grid(row=3, column=0, sticky="w", pady=5)
-        self.trans_amount_entry = ttk.Entry(input_frame, width=20)
-        self.trans_amount_entry.grid(row=3, column=1, pady=5, padx=5)
+        tk.Label(
+            form_body,
+            text="Amount:",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=3, column=0, sticky="w", pady=4)
+        self.trans_amount_entry = ttk.Entry(form_body, width=20)
+        self.trans_amount_entry.grid(row=3, column=1, sticky="ew", pady=4, padx=6)
         
-        ttk.Label(input_frame, text="Type:").grid(row=4, column=0, sticky="w", pady=5)
-        self.trans_type_combo = ttk.Combobox(input_frame, values=["income", "expense"], width=37, state="readonly")
-        self.trans_type_combo.grid(row=4, column=1, pady=5, padx=5)
+        tk.Label(
+            form_body,
+            text="Type:",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=4, column=0, sticky="w", pady=4)
+        self.trans_type_combo = ttk.Combobox(form_body, values=["income", "expense"], width=30, state="readonly")
+        self.trans_type_combo.grid(row=4, column=1, sticky="ew", pady=4, padx=6)
         self.trans_type_combo.set("expense")
         
-        ttk.Label(input_frame, text="Tag (optional):").grid(row=5, column=0, sticky="w", pady=5)
-        self.trans_tag_entry = ttk.Entry(input_frame, width=40)
-        self.trans_tag_entry.grid(row=5, column=1, pady=5, padx=5)
-        
-        # Buttons
-        button_frame = ttk.Frame(input_frame)
-        button_frame.grid(row=6, column=0, columnspan=2, pady=10)
-        
-        ttk.Button(button_frame, text="Add Transaction", command=self.add_transaction).pack(side="left", padx=5)
-        ttk.Button(button_frame, text="Import CSV", command=self.import_csv).pack(side="left", padx=5)
-        
-        # Filter frame
-        filter_frame = ttk.LabelFrame(self.transactions_frame, text="Filters", padding=10)
-        filter_frame.pack(fill="x", pady=5)
-        
-        ttk.Label(filter_frame, text="Category:").pack(side="left", padx=5)
-        self.filter_category_combo = ttk.Combobox(filter_frame, width=20, state="readonly")
-        self.filter_category_combo.pack(side="left", padx=5)
+        tk.Label(
+            form_body,
+            text="Tag (optional):",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=5, column=0, sticky="w", pady=4)
+        self.trans_tag_entry = ttk.Entry(form_body, width=40)
+        self.trans_tag_entry.grid(row=5, column=1, sticky="ew", pady=4, padx=6)
+
+        self.trans_goal_var = tk.BooleanVar(value=False)
+        goal_row = tk.Frame(form_body, bg=surface_bg)
+        goal_row.grid(row=6, column=0, columnspan=2, sticky="ew", pady=4)
+        goal_row.columnconfigure(1, weight=1)
+
+        ttk.Checkbutton(
+            goal_row,
+            text="Contribute to Goal",
+            variable=self.trans_goal_var,
+            command=self._toggle_goal_contribution
+        ).grid(row=0, column=0, sticky="w")
+        self.trans_goal_combo = ttk.Combobox(goal_row, width=26, state="disabled")
+        self.trans_goal_combo.grid(row=0, column=1, sticky="ew", padx=6)
+
+        button_frame = tk.Frame(form_card, bg=surface_bg)
+        button_frame.grid(row=2, column=0, sticky="w", padx=12, pady=(0, 12))
+        ttk.Button(button_frame, text="Add Transaction", command=self.add_transaction).pack(side="left", padx=(0, 6))
+        ttk.Button(button_frame, text="Import CSV", command=self.import_csv).pack(side="left")
+
+        list_card = tk.Frame(
+            content,
+            bg=surface_bg,
+            highlightbackground=surface_border,
+            highlightthickness=1
+        )
+        list_card.grid(row=0, column=1, sticky="nsew")
+        list_card.columnconfigure(0, weight=1)
+        list_card.rowconfigure(2, weight=1)
+
+        list_title = tk.Label(
+            list_card,
+            text="Transactions",
+            bg=surface_bg,
+            fg=text_primary,
+            font=("Helvetica Neue", 12, "bold")
+        )
+        list_title.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+
+        filter_bar = tk.Frame(list_card, bg=surface_header_bg)
+        filter_bar.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
+        filter_bar.columnconfigure(1, weight=1)
+        filter_bar.columnconfigure(3, weight=1)
+        filter_bar.columnconfigure(5, weight=1)
+
+        tk.Label(
+            filter_bar,
+            text="Category:",
+            bg=surface_header_bg,
+            fg=text_muted
+        ).grid(row=0, column=0, sticky="w", padx=(0, 4), pady=6)
+        self.filter_category_combo = ttk.Combobox(filter_bar, width=20, state="readonly")
+        self.filter_category_combo.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=6)
         self.filter_category_combo.bind("<<ComboboxSelected>>", self.apply_transaction_filters)
-        
-        ttk.Label(filter_frame, text="From:").pack(side="left", padx=5)
-        self.filter_from_entry = ttk.Entry(filter_frame, width=15)
-        self.filter_from_entry.pack(side="left", padx=5)
-        
-        ttk.Label(filter_frame, text="To:").pack(side="left", padx=5)
-        self.filter_to_entry = ttk.Entry(filter_frame, width=15)
-        self.filter_to_entry.pack(side="left", padx=5)
-        
-        ttk.Button(filter_frame, text="Apply Filter", command=self.apply_transaction_filters).pack(side="left", padx=5)
-        ttk.Button(filter_frame, text="Clear Filter", command=self.clear_transaction_filters).pack(side="left", padx=5)
-        
-        # Transactions list
-        list_frame = ttk.LabelFrame(self.transactions_frame, text="Transactions", padding=10)
-        list_frame.pack(fill="both", expand=True, pady=5)
-        
-        # Treeview with scrollbar
-        tree_frame = ttk.Frame(list_frame)
-        tree_frame.pack(fill="both", expand=True)
-        
+
+        tk.Label(
+            filter_bar,
+            text="From:",
+            bg=surface_header_bg,
+            fg=text_muted
+        ).grid(row=0, column=2, sticky="w", padx=(0, 4), pady=6)
+        self.filter_from_entry = ttk.Entry(filter_bar, width=14)
+        self.filter_from_entry.grid(row=0, column=3, sticky="ew", padx=(0, 10), pady=6)
+
+        tk.Label(
+            filter_bar,
+            text="To:",
+            bg=surface_header_bg,
+            fg=text_muted
+        ).grid(row=0, column=4, sticky="w", padx=(0, 4), pady=6)
+        self.filter_to_entry = ttk.Entry(filter_bar, width=14)
+        self.filter_to_entry.grid(row=0, column=5, sticky="ew", padx=(0, 10), pady=6)
+
+        ttk.Button(filter_bar, text="Apply", command=self.apply_transaction_filters).grid(
+            row=0,
+            column=6,
+            sticky="ew",
+            padx=(0, 6),
+            pady=6
+        )
+        ttk.Button(filter_bar, text="Clear", command=self.clear_transaction_filters).grid(
+            row=0,
+            column=7,
+            sticky="ew",
+            pady=6
+        )
+
+        list_body = tk.Frame(list_card, bg=surface_bg)
+        list_body.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        list_body.columnconfigure(0, weight=1)
+        list_body.rowconfigure(0, weight=1)
+
+        tree_frame = ttk.Frame(list_body)
+        tree_frame.grid(row=0, column=0, sticky="nsew")
+
         scrollbar = ttk.Scrollbar(tree_frame)
         scrollbar.pack(side="right", fill="y")
-        
-        self.transactions_tree = ttk.Treeview(tree_frame, columns=('ID', 'Date', 'Description', 'Category', 'Amount', 'Type', 'Tag'), 
-                                             yscrollcommand=scrollbar.set, height=15)
+
+        self.transactions_tree = ttk.Treeview(
+            tree_frame,
+            columns=('ID', 'Date', 'Description', 'Category', 'Amount', 'Type', 'Tag'),
+            yscrollcommand=scrollbar.set,
+            height=15
+        )
         self.transactions_tree.pack(side="left", fill="both", expand=True)
         scrollbar.config(command=self.transactions_tree.yview)
         
@@ -1287,53 +1472,105 @@ class BudgetingApp:
     
     def create_goals_tab(self):
         """Create goals management interface"""
+        self.goals_frame.columnconfigure(0, weight=3)
+        self.goals_frame.columnconfigure(1, weight=1)
+        self.goals_frame.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(self.goals_frame, padding=(5, 8))
+        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        header.columnconfigure(0, weight=1)
+
+        self.goals_title = tk.Label(
+            header,
+            text=self._t("goals_tab"),
+            font=("Helvetica Neue", 22, "bold")
+        )
+        self.goals_title.grid(row=0, column=0, sticky="w")
+
+        left_panel = ttk.Frame(self.goals_frame, padding=10)
+        left_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
+        left_panel.columnconfigure(0, weight=1)
+        left_panel.rowconfigure(1, weight=1)
+
+        ttk.Label(left_panel, text="Goals Overview", font=("Helvetica", 12, "bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 8)
+        )
+
+        self.goals_cards_canvas = tk.Canvas(left_panel, highlightthickness=0)
+        goals_scroll = ttk.Scrollbar(left_panel, orient="vertical", command=self.goals_cards_canvas.yview)
+        self.goals_cards_canvas.configure(yscrollcommand=goals_scroll.set)
+
+        self.goals_cards_frame = ttk.Frame(self.goals_cards_canvas)
+        window_id = self.goals_cards_canvas.create_window((0, 0), window=self.goals_cards_frame, anchor="n")
+
+        def on_cards_configure(event):
+            self.goals_cards_canvas.configure(scrollregion=self.goals_cards_canvas.bbox("all"))
+
+        def on_canvas_resize(event):
+            self.goals_cards_canvas.itemconfigure(window_id, width=event.width)
+
+        self.goals_cards_frame.bind("<Configure>", on_cards_configure)
+        self.goals_cards_canvas.bind("<Configure>", on_canvas_resize)
+
+        self.goals_cards_canvas.grid(row=1, column=0, sticky="nsew")
+        goals_scroll.grid(row=1, column=1, sticky="ns")
+
+        management_panel = ttk.Frame(self.goals_frame, padding=10)
+        management_panel.grid(row=1, column=1, sticky="nsew")
+        management_panel.columnconfigure(0, weight=1)
+
         # Add Goal Frame
-        add_frame = ttk.LabelFrame(self.goals_frame, text="Add Goal", padding=10)
-        add_frame.pack(fill="x", pady=5)
-        
+        add_frame = ttk.LabelFrame(management_panel, text="Add Goal", padding=10)
+        add_frame.pack(fill="x", pady=(0, 10))
+
         ttk.Label(add_frame, text="Name:").grid(row=0, column=0, sticky="w", pady=5)
-        self.goal_name_entry = ttk.Entry(add_frame, width=30)
+        self.goal_name_entry = ttk.Entry(add_frame, width=26)
         self.goal_name_entry.grid(row=0, column=1, pady=5, padx=5)
-        
+
         ttk.Label(add_frame, text="Type:").grid(row=1, column=0, sticky="w", pady=5)
-        self.goal_type_combo = ttk.Combobox(add_frame, values=["savings", "debt"], width=27, state="readonly")
+        self.goal_type_combo = ttk.Combobox(add_frame, values=["savings", "debt"], width=23, state="readonly")
         self.goal_type_combo.grid(row=1, column=1, pady=5, padx=5)
         self.goal_type_combo.set("savings")
-        
+
         ttk.Label(add_frame, text="Target Amount:").grid(row=2, column=0, sticky="w", pady=5)
-        self.goal_target_entry = ttk.Entry(add_frame, width=20)
+        self.goal_target_entry = ttk.Entry(add_frame, width=18)
         self.goal_target_entry.grid(row=2, column=1, pady=5, padx=5)
-        
+
         ttk.Label(add_frame, text="Target Date:").grid(row=3, column=0, sticky="w", pady=5)
-        self.goal_date_entry = ttk.Entry(add_frame, width=20)
+        self.goal_date_entry = ttk.Entry(add_frame, width=18)
         self.goal_date_entry.grid(row=3, column=1, pady=5, padx=5)
-        
+
         ttk.Label(add_frame, text="Linked Category:").grid(row=4, column=0, sticky="w", pady=5)
-        self.goal_category_combo = ttk.Combobox(add_frame, width=27, state="readonly")
+        self.goal_category_combo = ttk.Combobox(add_frame, width=23, state="readonly")
         self.goal_category_combo.grid(row=4, column=1, pady=5, padx=5)
-        
+
         ttk.Button(add_frame, text="Add Goal", command=self.add_goal).grid(row=5, column=0, columnspan=2, pady=10)
-        
+
         # Goals list
-        list_frame = ttk.LabelFrame(self.goals_frame, text="Financial Goals", padding=10)
-        list_frame.pack(fill="both", expand=True, pady=5)
-        
-        self.goals_tree = ttk.Treeview(list_frame, columns=('ID', 'Name', 'Type', 'Progress', 'Target Date', 'Status'), height=15)
+        list_frame = ttk.LabelFrame(management_panel, text="Goals List", padding=10)
+        list_frame.pack(fill="both", expand=True)
+
+        self.goals_tree = ttk.Treeview(
+            list_frame,
+            columns=('ID', 'Name', 'Type', 'Progress', 'Target Date', 'Status'),
+            height=8
+        )
         self.goals_tree.pack(fill="both", expand=True)
-        
+
         self.goals_tree.heading('ID', text='ID')
         self.goals_tree.heading('Name', text='Name')
         self.goals_tree.heading('Type', text='Type')
         self.goals_tree.heading('Progress', text='Progress')
         self.goals_tree.heading('Target Date', text='Target Date')
         self.goals_tree.heading('Status', text='Status')
-        
-        self.goals_tree.column('ID', width=50, anchor='center')
-        self.goals_tree.column('Name', width=200)
-        self.goals_tree.column('Type', width=80, anchor='center')
-        self.goals_tree.column('Progress', width=100, anchor='center')
-        self.goals_tree.column('Target Date', width=100, anchor='center')
-        self.goals_tree.column('Status', width=80, anchor='center')
+
+        self.goals_tree.column('ID', width=40, anchor='center')
+        self.goals_tree.column('Name', width=140)
+        self.goals_tree.column('Type', width=70, anchor='center')
+        self.goals_tree.column('Progress', width=80, anchor='center')
+        self.goals_tree.column('Target Date', width=90, anchor='center')
+        self.goals_tree.column('Status', width=70, anchor='center')
+
         self.goals_tree.bind("<Double-1>", self.edit_goal)
         self.goals_menu = tk.Menu(self.goals_tree, tearoff=0)
         self.goals_menu.add_command(label="Edit Goal", command=self.edit_goal)
@@ -1342,39 +1579,159 @@ class BudgetingApp:
             "<Button-3>",
             lambda event: self._show_tree_context_menu(event, self.goals_tree, self.goals_menu)
         )
+
+        actions_frame = ttk.Frame(management_panel)
+        actions_frame.pack(fill="x", pady=(10, 0))
+        actions_frame.columnconfigure(0, weight=1)
+        actions_frame.columnconfigure(1, weight=1)
+
+        ttk.Button(actions_frame, text="Edit Goal", command=self.edit_goal).grid(
+            row=0, column=0, sticky="ew", padx=2, pady=2
+        )
+        ttk.Button(actions_frame, text="Delete Goal", command=self.delete_goal).grid(
+            row=0, column=1, sticky="ew", padx=2, pady=2
+        )
     
     def create_reports_tab(self):
         """Create reports interface"""
-        # Report options
-        options_frame = ttk.LabelFrame(self.reports_frame, text="Report Options", padding=10)
-        options_frame.pack(fill="x", pady=5)
-        
-        ttk.Label(options_frame, text="Report Type:").grid(row=0, column=0, sticky="w", pady=5)
-        self.report_type_combo = ttk.Combobox(options_frame, values=["weekly", "monthly", "yearly", "custom"], width=25, state="readonly")
-        self.report_type_combo.grid(row=0, column=1, pady=5, padx=5)
+        surface_bg = "#2f2f2f"
+        surface_border = "#4a4a4a"
+        surface_header_bg = "#3a3a3a"
+        text_primary = "#f5f5f5"
+        text_muted = "#cfcfcf"
+
+        self.reports_frame.columnconfigure(0, weight=1)
+        self.reports_frame.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(self.reports_frame, padding=(6, 10))
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+
+        self.reports_title = tk.Label(
+            header,
+            text=self._t("reports_tab"),
+            font=("Helvetica Neue", 22, "bold")
+        )
+        self.reports_title.grid(row=0, column=0, sticky="w")
+
+        subtitle = ttk.Label(
+            header,
+            text="Build quick snapshots and export your data."
+        )
+        subtitle.configure(foreground=text_muted)
+        subtitle.grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+        content = ttk.Frame(self.reports_frame, padding=10)
+        content.grid(row=1, column=0, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.columnconfigure(1, weight=2)
+        content.rowconfigure(0, weight=1)
+
+        options_card = tk.Frame(
+            content,
+            bg=surface_bg,
+            highlightbackground=surface_border,
+            highlightthickness=1
+        )
+        options_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        options_card.columnconfigure(0, weight=1)
+
+        options_title = tk.Label(
+            options_card,
+            text="Report Options",
+            bg=surface_bg,
+            fg=text_primary,
+            font=("Helvetica Neue", 12, "bold")
+        )
+        options_title.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+
+        options_body = tk.Frame(options_card, bg=surface_bg)
+        options_body.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 8))
+        options_body.columnconfigure(1, weight=1)
+
+        tk.Label(
+            options_body,
+            text="Report Type:",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=0, column=0, sticky="w", pady=4)
+        self.report_type_combo = ttk.Combobox(
+            options_body,
+            values=["weekly", "monthly", "yearly", "custom"],
+            width=23,
+            state="readonly"
+        )
+        self.report_type_combo.grid(row=0, column=1, sticky="ew", pady=4, padx=6)
         self.report_type_combo.set("monthly")
-        
-        ttk.Label(options_frame, text="Start Date:").grid(row=1, column=0, sticky="w", pady=5)
-        self.report_start_entry = ttk.Entry(options_frame, width=20)
-        self.report_start_entry.grid(row=1, column=1, pady=5, padx=5)
-        
-        ttk.Label(options_frame, text="End Date:").grid(row=2, column=0, sticky="w", pady=5)
-        self.report_end_entry = ttk.Entry(options_frame, width=20)
-        self.report_end_entry.grid(row=2, column=1, pady=5, padx=5)
-        
-        button_frame = ttk.Frame(options_frame)
-        button_frame.grid(row=3, column=0, columnspan=2, pady=10)
-        
-        ttk.Button(button_frame, text="Generate Report", command=self.generate_report).pack(side="left", padx=5)
-        ttk.Button(button_frame, text="Export PDF", command=lambda: self.export_report('pdf')).pack(side="left", padx=5)
-        ttk.Button(button_frame, text="Export CSV", command=lambda: self.export_report('csv')).pack(side="left", padx=5)
-        
-        # Report display
-        self.report_display = ttk.Frame(self.reports_frame)
-        self.report_display.pack(fill="both", expand=True, pady=5)
-        
+
+        tk.Label(
+            options_body,
+            text="Start Date:",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=1, column=0, sticky="w", pady=4)
+        self.report_start_entry = ttk.Entry(options_body, width=20)
+        self.report_start_entry.grid(row=1, column=1, sticky="ew", pady=4, padx=6)
+
+        tk.Label(
+            options_body,
+            text="End Date:",
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=2, column=0, sticky="w", pady=4)
+        self.report_end_entry = ttk.Entry(options_body, width=20)
+        self.report_end_entry.grid(row=2, column=1, sticky="ew", pady=4, padx=6)
+
+        button_frame = ttk.Frame(options_card)
+        button_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
+        button_frame.columnconfigure(0, weight=1)
+        button_frame.columnconfigure(1, weight=1)
+
+        ttk.Button(button_frame, text="Generate Report", command=self.generate_report).grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=(0, 6)
+        )
+        ttk.Button(button_frame, text="Export PDF", command=lambda: self.export_report('pdf')).grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=(0, 6)
+        )
+        ttk.Button(button_frame, text="Export CSV", command=lambda: self.export_report('csv')).grid(
+            row=1,
+            column=1,
+            sticky="ew"
+        )
+
+        report_card = tk.Frame(
+            content,
+            bg=surface_bg,
+            highlightbackground=surface_border,
+            highlightthickness=1
+        )
+        report_card.grid(row=0, column=1, sticky="nsew")
+        report_card.columnconfigure(0, weight=1)
+        report_card.rowconfigure(1, weight=1)
+
+        report_title = tk.Label(
+            report_card,
+            text="Report Preview",
+            bg=surface_bg,
+            fg=text_primary,
+            font=("Helvetica Neue", 12, "bold")
+        )
+        report_title.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+
+        self.report_display = tk.Frame(report_card, bg=surface_bg)
+        self.report_display.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self.report_display.columnconfigure(0, weight=1)
+        self.report_display.rowconfigure(0, weight=1)
+
         self.report_text = tk.Text(self.report_display, height=20, width=80)
-        self.report_text.pack(fill="both", expand=True, padx=10, pady=5)
+        self.report_text.grid(row=0, column=0, sticky="nsew")
 
     def _format_currency(self, amount):
         """Format a currency value for display."""
@@ -1868,6 +2225,7 @@ class BudgetingApp:
         
         transactions = self.system.get_transactions(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
         goals = self.system.get_goals()
+        self._update_goal_selector(goals)
         
         income = sum(t[5] for t in transactions if t[6] == 'income')
         expenses = sum(t[5] for t in transactions if t[6] == 'expense')
@@ -2003,6 +2361,69 @@ class BudgetingApp:
                 row["desc"].config(text="No recent activity")
                 row["arrow"].config(text="-", fg="#555555")
 
+    def _format_goal_label(self, goal, duplicates):
+        """Format goal labels for dropdowns with duplicate names."""
+        name = goal[3]
+        if name in duplicates:
+            return f"{name} (Goal {goal[0]})"
+        return name
+
+    def _update_goal_selector(self, goals):
+        """Refresh the dashboard goal selector options."""
+        if not hasattr(self, "goal_selector_combo") or not self.goal_selector_combo:
+            return
+        if not goals:
+            self.goal_option_map = {}
+            self.active_goal_id = None
+            self.goal_selector_combo.config(values=["No goals"], state="disabled")
+            if self.goal_selector_var:
+                self.goal_selector_var.set("No goals")
+            return
+
+        names = [goal[3] for goal in goals]
+        duplicates = {name for name in names if names.count(name) > 1}
+        options = []
+        self.goal_option_map = {}
+        for goal in goals:
+            label = self._format_goal_label(goal, duplicates)
+            options.append(label)
+            self.goal_option_map[label] = goal[0]
+
+        self.goal_selector_combo.config(values=options, state="readonly")
+        if self.active_goal_id and any(goal[0] == self.active_goal_id for goal in goals):
+            selected_label = next(
+                (label for label, goal_id in self.goal_option_map.items() if goal_id == self.active_goal_id),
+                options[0]
+            )
+        else:
+            default_goal = next((goal for goal in goals if goal[9] != 'completed'), goals[0])
+            self.active_goal_id = default_goal[0]
+            selected_label = next(
+                (label for label, goal_id in self.goal_option_map.items() if goal_id == self.active_goal_id),
+                options[0]
+            )
+        if self.goal_selector_var:
+            self.goal_selector_var.set(selected_label)
+
+    def _on_goal_selection(self, event=None):
+        """Handle dashboard goal selector changes."""
+        if not self.goal_selector_var:
+            return
+        label = self.goal_selector_var.get()
+        goal_id = self.goal_option_map.get(label)
+        if goal_id:
+            self.active_goal_id = goal_id
+            self._update_goal_ring()
+
+    def _toggle_goal_contribution(self):
+        """Enable or disable the goal contribution selector."""
+        if not hasattr(self, "trans_goal_combo"):
+            return
+        if self.trans_goal_var.get() and self.trans_goal_combo["values"]:
+            self.trans_goal_combo.config(state="readonly")
+        else:
+            self.trans_goal_combo.config(state="disabled")
+
     def _update_goal_ring(self, goals=None):
         """Render the compact goal progress ring"""
         if not hasattr(self, "goal_ring_ax"):
@@ -2019,17 +2440,23 @@ class BudgetingApp:
                 self.goal_ring_subtitle.config(text=self._t("goal_ring_empty"))
             self.goal_ring_canvas.draw()
             return
-        # Prefer the highest priority active goal
-        primary_goal = next((goal for goal in goals if goal[9] != 'completed'), goals[0])
-        target_amount = primary_goal[5] or 0
-        current_amount = primary_goal[7] or 0
-        progress_value = primary_goal[8] or 0
+        selected_goal = None
+        if self.active_goal_id:
+            selected_goal = next((goal for goal in goals if goal[0] == self.active_goal_id), None)
+        if not selected_goal:
+            selected_goal = next((goal for goal in goals if goal[9] != 'completed'), goals[0])
+            self.active_goal_id = selected_goal[0]
+        target_amount = selected_goal[5] or 0
+        current_amount = selected_goal[7] or 0
+        progress_value = selected_goal[8] or 0
         if target_amount > 0 and progress_value <= 0 and current_amount:
             progress_value = (current_amount / target_amount) * 100
-        progress_value = max(0.0, min(progress_value, 100.0))
-        remainder = max(0.0, 100.0 - progress_value)
-        data = [progress_value]
-        colors = ["#f06292"]
+        progress_value = max(0.0, progress_value)
+        display_progress = min(progress_value, 100.0)
+        remainder = max(0.0, 100.0 - display_progress)
+        data = [display_progress]
+        color_index = goals.index(selected_goal) if selected_goal in goals else 0
+        colors = [self.category_palette[color_index % len(self.category_palette)]]
         if remainder > 0:
             data.append(remainder)
             colors.append("#fde4e4")
@@ -2057,18 +2484,170 @@ class BudgetingApp:
         self.goal_ring_ax.text(
             0,
             -0.05,
-            f"{progress_value:.0f}%",
+            f"{display_progress:.0f}%",
             ha="center",
             va="center",
             fontsize=18,
             fontweight='bold',
             zorder=10
         )
-        goal_name = primary_goal[3]
+        goal_name = selected_goal[3]
         if hasattr(self, "goal_ring_subtitle"):
-            self.goal_ring_subtitle.config(text=goal_name or "")
+            if target_amount:
+                subtitle = f"{goal_name}\n£{current_amount:.2f} / £{target_amount:.2f}"
+            else:
+                subtitle = goal_name or ""
+            self.goal_ring_subtitle.config(text=subtitle)
         self.goal_ring_has_goal = True
         self.goal_ring_canvas.draw()
+
+    def _get_goal_progress_info(self, goal):
+        """Return progress data for a goal."""
+        target_amount = goal[5] or 0
+        current_amount = goal[7] or 0
+        progress_value = goal[8] or 0
+        if target_amount > 0 and progress_value <= 0 and current_amount:
+            progress_value = (current_amount / target_amount) * 100
+        progress_value = max(0.0, progress_value)
+        display_progress = min(progress_value, 100.0)
+        return display_progress, progress_value, current_amount, target_amount
+
+    def _build_goal_card(self, parent, goal, color):
+        """Render a goal card with donut and stats."""
+        card = tk.Frame(parent, bg="white", highlightbackground="#d6d6d6", highlightthickness=1)
+        card.pack(fill="x", pady=8)
+
+        header = tk.Frame(card, bg="white")
+        header.pack(fill="x", padx=10, pady=(8, 4))
+
+        name_label = tk.Label(
+            header,
+            text=goal[3],
+            bg="white",
+            fg="#111111",
+            font=("Helvetica", 12, "bold")
+        )
+        name_label.pack(side="left")
+
+        status_text = (goal[9] or "active").title()
+        status_color = "#2e8b57" if status_text.lower() == "completed" else "#c47f00"
+        status_label = tk.Label(
+            header,
+            text=status_text,
+            bg="white",
+            fg=status_color,
+            font=("Helvetica", 10, "bold")
+        )
+        status_label.pack(side="right")
+
+        body = tk.Frame(card, bg="white")
+        body.pack(fill="x", padx=10, pady=(0, 10))
+        body.columnconfigure(1, weight=1)
+
+        fig, ax = plt.subplots(figsize=(2.6, 2.2))
+        fig.patch.set_facecolor("white")
+        display_progress, progress_value, current_amount, target_amount = self._get_goal_progress_info(goal)
+        remainder = max(100.0 - display_progress, 0.0)
+        ax.pie(
+            [display_progress, remainder],
+            startangle=90,
+            colors=[color, "#e6e6e6"],
+            wedgeprops={"width": 0.35, "edgecolor": "white"}
+        )
+        ax.text(
+            0,
+            0.05,
+            f"{display_progress:.0f}%",
+            ha="center",
+            va="center",
+            fontsize=11,
+            fontweight="bold"
+        )
+        ax.text(
+            0,
+            -0.18,
+            self._format_currency(current_amount),
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="#555555"
+        )
+        ax.set_aspect("equal")
+        ax.axis("off")
+
+        canvas = FigureCanvasTkAgg(fig, master=body)
+        canvas_widget = canvas.get_tk_widget()
+        canvas_widget.grid(row=0, column=0, sticky="w", padx=(0, 10))
+
+        stats = tk.Frame(body, bg="white")
+        stats.grid(row=0, column=1, sticky="nsew")
+
+        target_date = goal[6]
+        try:
+            target_date = datetime.datetime.strptime(goal[6], "%Y-%m-%d").strftime("%d %b %Y")
+        except (TypeError, ValueError):
+            target_date = goal[6] or "-"
+
+        stat_lines = [
+            ("Target", self._format_currency(target_amount)),
+            ("Current", self._format_currency(current_amount)),
+            ("Type", (goal[4] or "").title()),
+            ("Due", target_date)
+        ]
+
+        for idx, (label, value) in enumerate(stat_lines):
+            tk.Label(
+                stats,
+                text=f"{label}:",
+                bg="white",
+                fg="#555555",
+                font=("Helvetica", 9, "bold")
+            ).grid(row=idx, column=0, sticky="w", pady=1)
+            tk.Label(
+                stats,
+                text=value,
+                bg="white",
+                fg="#111111",
+                font=("Helvetica", 9)
+            ).grid(row=idx, column=1, sticky="w", padx=(6, 0), pady=1)
+
+        if progress_value > 100:
+            tk.Label(
+                stats,
+                text="Over target",
+                bg="white",
+                fg="#c0392b",
+                font=("Helvetica", 9, "bold")
+            ).grid(row=len(stat_lines), column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+        return fig
+
+    def refresh_goal_cards(self, goals=None):
+        """Refresh all goal cards in the goals tab."""
+        if not self.goals_cards_frame:
+            return
+        if goals is None:
+            goals = self.system.get_goals()
+        for fig in self.goal_card_figs:
+            plt.close(fig)
+        self.goal_card_figs = []
+        for child in self.goals_cards_frame.winfo_children():
+            child.destroy()
+        if not goals:
+            tk.Label(
+                self.goals_cards_frame,
+                text="No goals yet. Add one to start tracking progress.",
+                font=("Helvetica", 11),
+                fg="#555555"
+            ).pack(pady=20)
+            return
+        for idx, goal in enumerate(goals):
+            fig = self._build_goal_card(
+                self.goals_cards_frame,
+                goal,
+                self.category_palette[idx % len(self.category_palette)]
+            )
+            self.goal_card_figs.append(fig)
 
     def refresh_transactions(self):
         """Refresh transactions list"""
@@ -2130,10 +2709,15 @@ class BudgetingApp:
         
         goals = self.system.get_goals()
         for goal in goals:
-            progress = f"{goal[8]:.1f}%"
+            progress_value = goal[8] or 0
+            if goal[5] and progress_value <= 0 and goal[7]:
+                progress_value = (goal[7] / goal[5]) * 100
+            progress = f"{progress_value:.1f}%"
             self.goals_tree.insert('', 'end', values=(
                 goal[0], goal[3], goal[4], progress, goal[6], goal[9]
             ))
+        self.refresh_goal_cards(goals)
+        self._update_goal_selector(goals)
     
     def refresh_comboboxes(self):
         """Refresh all combobox data"""
@@ -2158,6 +2742,8 @@ class BudgetingApp:
         if category_names:
             self.trans_category_combo.set(category_names[0])
             self.budget_category_combo.set(category_names[0])
+
+        self._refresh_goal_contribution_options()
     
     def get_category_name(self, category_id):
         """Get category name by ID"""
@@ -2165,6 +2751,33 @@ class BudgetingApp:
             return "None"
         cat = self.db.execute_query("SELECT name FROM categories WHERE category_id = ?", (category_id,), fetch_one=True)
         return cat[0] if cat else "Unknown"
+
+    def _refresh_goal_contribution_options(self):
+        """Refresh the goal options for transaction contributions."""
+        if not hasattr(self, "trans_goal_combo"):
+            return
+        goals = self.system.get_goals()
+        if not goals:
+            self.trans_goal_combo.config(values=[], state="disabled")
+            self.trans_goal_combo.set("")
+            self.trans_goal_map = {}
+            if self.trans_goal_var:
+                self.trans_goal_var.set(False)
+            return
+
+        names = [goal[3] for goal in goals]
+        duplicates = {name for name in names if names.count(name) > 1}
+        options = []
+        self.trans_goal_map = {}
+        for goal in goals:
+            label = self._format_goal_label(goal, duplicates)
+            options.append(label)
+            self.trans_goal_map[label] = goal[0]
+
+        self.trans_goal_combo.config(values=options)
+        if not self.trans_goal_combo.get():
+            self.trans_goal_combo.set(options[0])
+        self._toggle_goal_contribution()
     
     def add_transaction(self):
         """Add new transaction"""
@@ -2174,6 +2787,7 @@ class BudgetingApp:
         amount = self.trans_amount_entry.get()
         trans_type = self.trans_type_combo.get()
         tag = self.trans_tag_entry.get()
+        goal_id = None
         
         if not all([date, description, category_name, amount, trans_type]):
             messagebox.showerror("Error", "Please fill all required fields")
@@ -2185,8 +2799,15 @@ class BudgetingApp:
             messagebox.showerror("Error", "Invalid category")
             return
         
+        if self.trans_goal_var.get():
+            goal_label = self.trans_goal_combo.get()
+            goal_id = self.trans_goal_map.get(goal_label) if hasattr(self, "trans_goal_map") else None
+            if not goal_id:
+                messagebox.showerror("Error", "Please select a goal to contribute to")
+                return
+
         success, message = self.system.add_transaction(
-            category[0], date, description, amount, trans_type, tag
+            category[0], date, description, amount, trans_type, tag, goal_id
         )
         
         if success:
@@ -2203,6 +2824,9 @@ class BudgetingApp:
         self.trans_tag_entry.delete(0, tk.END)
         self.trans_date_entry.delete(0, tk.END)
         self.trans_date_entry.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
+        if hasattr(self, "trans_goal_var"):
+            self.trans_goal_var.set(False)
+            self._toggle_goal_contribution()
     
     def edit_transaction(self, event=None):
         """Edit selected transaction"""
@@ -2394,7 +3018,7 @@ class BudgetingApp:
                             # Add transaction
                             self.system.db.create_transaction(
                                 self.system.current_user_id, cat_id,
-                                date, description, amount, trans_type
+                                date, description, amount, trans_type, None, None
                             )
                             imported += 1
                         except Exception as e:

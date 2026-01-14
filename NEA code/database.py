@@ -68,10 +68,13 @@ class DatabaseManager:
                 amount REAL NOT NULL,
                 type TEXT CHECK(type IN ('income', 'expense')),
                 tag TEXT,
+                goal_id INTEGER,
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-                FOREIGN KEY (category_id) REFERENCES categories(category_id)
+                FOREIGN KEY (category_id) REFERENCES categories(category_id),
+                FOREIGN KEY (goal_id) REFERENCES goals(goal_id)
             )
         """)
+        self._ensure_transaction_goal_column(cursor)
 
         # Budgets table keeps user-set limits for categories.
         cursor.execute("""
@@ -181,6 +184,13 @@ class DatabaseManager:
             cursor.execute("ALTER TABLE users ADD COLUMN failed_password_attempts INTEGER DEFAULT 0")
         if "lockout_until" not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN lockout_until DATETIME")
+
+    def _ensure_transaction_goal_column(self, cursor):
+        """Add goal_id column for legacy transaction rows if missing."""
+        cursor.execute("PRAGMA table_info(transactions)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "goal_id" not in columns:
+            cursor.execute("ALTER TABLE transactions ADD COLUMN goal_id INTEGER")
 
     # -----------------------
     # Query helper
@@ -321,13 +331,13 @@ class DatabaseManager:
     # -----------------------
     # Transaction methods
     # -----------------------
-    def create_transaction(self, user_id, category_id, date, description, amount, trans_type, tag=None):
+    def create_transaction(self, user_id, category_id, date, description, amount, trans_type, tag=None, goal_id=None):
         """Insert a new transaction row."""
         query = """
-            INSERT INTO transactions (user_id, category_id, date, description, amount, type, tag)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO transactions (user_id, category_id, date, description, amount, type, tag, goal_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
-        return self.execute_query(query, (user_id, category_id, date, description, amount, trans_type, tag))
+        return self.execute_query(query, (user_id, category_id, date, description, amount, trans_type, tag, goal_id))
 
     def get_transactions(self, user_id, start_date=None, end_date=None, category_id=None):
         """Return transactions with optional date and category filters."""

@@ -282,7 +282,7 @@ class BudgetingSystem:
         return True, "Category deleted successfully"
     
     # Transaction Management
-    def add_transaction(self, category_id, date, description, amount, trans_type, tag=None):
+    def add_transaction(self, category_id, date, description, amount, trans_type, tag=None, goal_id=None):
         """Add new transaction with validation"""
         if not self.current_user_id:
             return False, "Not logged in"
@@ -308,11 +308,12 @@ class BudgetingSystem:
         # Save transaction
         trans_id = self.db.create_transaction(
             self.current_user_id, category_id, date,
-            description, amount, trans_type, tag
+            description, amount, trans_type, tag, goal_id
         )
         
-        # Update goal progress if applicable
-        self._update_goal_progress_on_transaction(category_id, amount, trans_type)
+        # Update goal progress only when explicitly linked
+        if goal_id:
+            self._apply_goal_contribution(goal_id, amount)
         
         # Check budget alerts
         self._check_budget_alerts(category_id)
@@ -327,27 +328,18 @@ class BudgetingSystem:
                 return rule[2]  # Return category_id
         return category_id
     
-    def _update_goal_progress_on_transaction(self, category_id, amount, trans_type):
-        """Update goal progress when transaction is added"""
-        goals = self.db.get_goals(self.current_user_id)
-        
-        for goal in goals:
-            if goal[3] == category_id:  # linked_category
-                current = goal[6]
-                target = goal[5]
-                
-                if trans_type == 'income' and goal[4] == 'savings':
-                    current += amount
-                elif trans_type == 'expense' and goal[4] == 'debt':
-                    current += amount
-                
-                progress = (current / target) * 100
-                status = 'completed' if progress >= 100 else 'active'
-                
-                self.db.update_goal_progress(goal[0], current, progress, status)
-                
-                # Trigger milestone notifications
-                self._trigger_goal_milestones(goal[0], progress)
+    def _apply_goal_contribution(self, goal_id, amount):
+        """Update a goal when a transaction is explicitly linked to it."""
+        goal = self.db.get_goal_by_id(goal_id)
+        if not goal or goal[1] != self.current_user_id:
+            return
+        current = goal[7] or 0
+        target = goal[5] or 0
+        current += amount
+        progress = (current / target) * 100 if target else 0
+        status = 'completed' if progress >= 100 else 'active'
+        self.db.update_goal_progress(goal_id, current, progress, status)
+        self._trigger_goal_milestones(goal_id, progress)
     
     def _trigger_goal_milestones(self, goal_id, progress):
         """Trigger notifications at 25%, 50%, 75%, 100%"""
