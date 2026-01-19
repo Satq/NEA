@@ -32,6 +32,7 @@ class BudgetingSystem:
         # Login security settings.
         self.password_attempt_limit = 5
         self.password_lock_minutes = 10
+        self.category_name_max_length = 40
     
     # -----------------------
     # User Management
@@ -227,10 +228,32 @@ class BudgetingSystem:
         query = "SELECT username FROM users WHERE user_id = ?"
         result = self.db.execute_query(query, (self.current_user_id,), fetch_one=True)
         return result[0] if result else None
+
+    def _normalise_category_name(self, name):
+        if not isinstance(name, str):
+            return ""
+        return name.strip()
+
+    def _validate_category_name(self, name):
+        if not name:
+            return False, "Category name cannot be empty"
+        if name.isdigit():
+            return False, "Category name cannot be only numbers"
+        if len(name) > self.category_name_max_length:
+            return False, (
+                f"Category name must be {self.category_name_max_length} characters or fewer"
+            )
+        return True, ""
     
     # Category Management
     def create_category(self, name, category_type, parent_id=None):
         """Create new category"""
+        name = self._normalise_category_name(name)
+        is_valid, message = self._validate_category_name(name)
+        if not is_valid:
+            return False, message
+        if category_type not in ("income", "expense"):
+            return False, "Invalid category type"
         if self.db.get_category_by_name(name):
             return False, "Category already exists"
         
@@ -242,9 +265,17 @@ class BudgetingSystem:
         category = self.db.get_category_by_id(category_id)
         if not category:
             return False, "Category not found"
-        
-        if not name or category_type not in ('income', 'expense'):
-            return False, "Invalid category details"
+
+        name = self._normalise_category_name(name)
+        is_valid, message = self._validate_category_name(name)
+        if not is_valid:
+            return False, message
+        if category_type not in ("income", "expense"):
+            return False, "Invalid category type"
+
+        existing = self.db.get_category_by_name(name)
+        if existing and existing[0] != category_id:
+            return False, "Category already exists"
         
         if parent_id == category_id:
             return False, "Category cannot be its own parent"

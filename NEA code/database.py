@@ -156,23 +156,6 @@ class DatabaseManager:
             )
         """)
 
-        # Add default categories only if none exist yet.
-        cursor.execute("SELECT COUNT(*) FROM categories")
-        if cursor.fetchone()[0] == 0:
-            default_categories = [
-                ("Food", "expense"),
-                ("Transport", "expense"),
-                ("Entertainment", "expense"),
-                ("Utilities", "expense"),
-                ("Healthcare", "expense"),
-                ("Shopping", "expense"),
-                ("Salary", "income"),
-                ("Freelance", "income"),
-                ("Investments", "income"),
-                ("Other Income", "income")
-            ]
-            cursor.executemany("INSERT INTO categories (name, type) VALUES (?, ?)", default_categories)
-
         conn.commit()
         conn.close()
 
@@ -305,7 +288,7 @@ class DatabaseManager:
 
     def get_category_by_name(self, name):
         """Find a single category by its name."""
-        query = "SELECT * FROM categories WHERE name = ?"
+        query = "SELECT * FROM categories WHERE name = ? COLLATE NOCASE"
         return self.execute_query(query, (name,), fetch_one=True)
 
     def get_category_by_id(self, category_id):
