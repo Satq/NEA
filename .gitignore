@@ -28,6 +28,7 @@ test4.py
 *.db
 *.sqlite
 *.sqlite3
+test_auth.db
 
 # IDE
 .vscode/

@@ -223,25 +223,33 @@ class BudgetingApp:
             quick_actions,
             text=self._t("logout"),
             command=self.quick_logout,
-            relief="raised",
+            anchor="w",
+            padx=20,
+            pady=8,
+            relief="flat",
             bg="white",
             fg="#111111",
             activebackground="#e0e0e0",
+            activeforeground="#000000",
             cursor="hand2"
         )
-        self.logout_btn.pack(fill="x", pady=(0, 8))
+        self.logout_btn.pack(fill="x", pady=4)
         
         self.lock_btn = tk.Button(
             quick_actions,
             text=self._t("lock"),
             command=self.quick_lock,
-            relief="raised",
+            anchor="w",
+            padx=20,
+            pady=8,
+            relief="flat",
             bg="white",
             fg="#111111",
             activebackground="#e0e0e0",
+            activeforeground="#000000",
             cursor="hand2"
         )
-        self.lock_btn.pack(fill="x")
+        self.lock_btn.pack(fill="x", pady=4)
     
     def toggle_side_menu(self):
         """Show or hide the side menu"""
@@ -1133,6 +1141,7 @@ class BudgetingApp:
         header = ttk.Frame(self.categories_frame, padding=(5, 8))
         header.grid(row=0, column=0, columnspan=2, sticky="ew")
         header.columnconfigure(0, weight=1)
+        header.columnconfigure(1, weight=0)
 
         self.categories_title = tk.Label(
             header,
@@ -1143,6 +1152,24 @@ class BudgetingApp:
 
         self.categories_period_label = ttk.Label(header, text="", font=("Helvetica", 11))
         self.categories_period_label.grid(row=1, column=0, sticky="w")
+
+        filter_bar = ttk.Frame(header)
+        filter_bar.grid(row=0, column=1, rowspan=2, sticky="e")
+
+        ttk.Label(filter_bar, text="From").grid(row=0, column=0, padx=(0, 4))
+        self.category_from_entry = ttk.Entry(filter_bar, width=12)
+        self.category_from_entry.grid(row=0, column=1, padx=(0, 8))
+
+        ttk.Label(filter_bar, text="To").grid(row=0, column=2, padx=(0, 4))
+        self.category_to_entry = ttk.Entry(filter_bar, width=12)
+        self.category_to_entry.grid(row=0, column=3, padx=(0, 8))
+
+        ttk.Button(filter_bar, text="Apply", command=self.apply_category_date_range).grid(
+            row=0, column=4, padx=(0, 6)
+        )
+        ttk.Button(filter_bar, text="Clear", command=self.clear_category_date_range).grid(
+            row=0, column=5
+        )
 
         analytics_panel = ttk.Frame(self.categories_frame, padding=10)
         analytics_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
@@ -1213,6 +1240,53 @@ class BudgetingApp:
         self.categories_tree.bind(
             "<Button-3>",
             lambda event: self._show_tree_context_menu(event, self.categories_tree, self.categories_menu)
+        )
+
+        rules_frame = ttk.LabelFrame(management_panel, text="Default Rules", padding=10)
+        rules_frame.pack(fill="x", pady=(10, 0))
+        rules_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(rules_frame, text="Keyword:").grid(row=0, column=0, sticky="w", pady=4)
+        self.rule_keyword_entry = ttk.Entry(rules_frame, width=24)
+        self.rule_keyword_entry.grid(row=0, column=1, sticky="ew", pady=4, padx=5)
+
+        ttk.Label(rules_frame, text="Category:").grid(row=1, column=0, sticky="w", pady=4)
+        self.rule_category_combo = ttk.Combobox(rules_frame, width=21, state="readonly")
+        self.rule_category_combo.grid(row=1, column=1, sticky="ew", pady=4, padx=5)
+
+        ttk.Button(rules_frame, text="Add Rule", command=self.add_default_rule).grid(
+            row=2, column=0, columnspan=2, pady=(6, 4)
+        )
+
+        rules_list_frame = ttk.Frame(rules_frame)
+        rules_list_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+        rules_list_frame.columnconfigure(0, weight=1)
+        rules_list_frame.rowconfigure(0, weight=1)
+
+        self.rules_tree = ttk.Treeview(
+            rules_list_frame,
+            columns=('ID', 'Keyword', 'Category'),
+            height=5
+        )
+        self.rules_tree.grid(row=0, column=0, sticky="nsew")
+
+        self.rules_tree.heading('ID', text='ID')
+        self.rules_tree.heading('Keyword', text='Keyword')
+        self.rules_tree.heading('Category', text='Category')
+
+        self.rules_tree.column('ID', width=40, anchor='center')
+        self.rules_tree.column('Keyword', width=140)
+        self.rules_tree.column('Category', width=140)
+
+        self.rules_menu = tk.Menu(self.rules_tree, tearoff=0)
+        self.rules_menu.add_command(label="Delete Rule", command=self.delete_default_rule)
+        self.rules_tree.bind(
+            "<Button-3>",
+            lambda event: self._show_tree_context_menu(event, self.rules_tree, self.rules_menu)
+        )
+
+        ttk.Button(rules_frame, text="Delete Rule", command=self.delete_default_rule).grid(
+            row=4, column=0, columnspan=2, pady=(6, 0)
         )
 
         actions_frame = ttk.Frame(management_panel)
@@ -1745,6 +1819,54 @@ class BudgetingApp:
         end_label = end_date.strftime("%d %b %Y")
         return f"Period: {start_label} - {end_label}"
 
+    def _sync_category_date_entries(self, start_date, end_date):
+        """Keep category date inputs aligned with the active range."""
+        if not hasattr(self, "category_from_entry"):
+            return
+        focused = self.root.focus_get()
+        if focused in (self.category_from_entry, self.category_to_entry):
+            return
+        self.category_from_entry.delete(0, tk.END)
+        self.category_to_entry.delete(0, tk.END)
+        if start_date and end_date:
+            self.category_from_entry.insert(0, start_date.strftime("%Y-%m-%d"))
+            self.category_to_entry.insert(0, end_date.strftime("%Y-%m-%d"))
+
+    def apply_category_date_range(self):
+        """Apply date range filters to category analytics."""
+        if not hasattr(self, "category_from_entry"):
+            return
+        from_date = self.category_from_entry.get().strip()
+        to_date = self.category_to_entry.get().strip()
+
+        if not from_date and not to_date:
+            self.category_date_range = (None, None)
+            self.refresh_category_charts()
+            return
+        if not from_date or not to_date:
+            messagebox.showerror("Error", "Please enter both start and end dates (YYYY-MM-DD).")
+            return
+        try:
+            start_date = datetime.datetime.strptime(from_date, "%Y-%m-%d").date()
+            end_date = datetime.datetime.strptime(to_date, "%Y-%m-%d").date()
+        except ValueError:
+            messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+            return
+        if end_date < start_date:
+            messagebox.showerror("Error", "End date cannot be before start date.")
+            return
+        self.category_date_range = (start_date, end_date)
+        self.refresh_category_charts()
+
+    def clear_category_date_range(self):
+        """Clear date range filters for category analytics."""
+        if hasattr(self, "category_from_entry"):
+            self.category_from_entry.delete(0, tk.END)
+        if hasattr(self, "category_to_entry"):
+            self.category_to_entry.delete(0, tk.END)
+        self.category_date_range = (None, None)
+        self.refresh_category_charts()
+
     def _get_category_date_range(self):
         """Return the active date range for category analytics."""
         if self.category_date_range:
@@ -1910,6 +2032,7 @@ class BudgetingApp:
         start_date, end_date = self._get_category_date_range()
         if hasattr(self, "categories_period_label"):
             self.categories_period_label.config(text=self._format_date_range_label(start_date, end_date))
+        self._sync_category_date_entries(start_date, end_date)
 
     def _get_budget_date_range(self):
         """Return the active date range for budget analytics."""
@@ -2207,6 +2330,7 @@ class BudgetingApp:
         self.refresh_category_charts()
         self.refresh_transactions()
         self.refresh_categories()
+        self.refresh_default_rules()
         self.refresh_budgets()
         self.refresh_goals()
         self.refresh_comboboxes()
@@ -2669,6 +2793,22 @@ class BudgetingApp:
             # cat structure: (category_id, parent_category_id, name, type)
             parent_name = self.get_category_name(cat[1]) if cat[1] else ""
             self.categories_tree.insert('', 'end', values=(cat[0], cat[2], cat[3], parent_name))
+
+    def refresh_default_rules(self):
+        """Refresh default rule list."""
+        if not hasattr(self, "rules_tree"):
+            return
+        for child in self.rules_tree.get_children():
+            self.rules_tree.delete(child)
+
+        rules = self.system.get_default_rules()
+        categories = self.system.get_categories()
+        category_lookup = {cat[0]: cat[2] for cat in categories}
+        for rule in rules:
+            rule_id = rule[0]
+            keyword = rule[2]
+            category_name = category_lookup.get(rule[3], "Unknown")
+            self.rules_tree.insert('', 'end', values=(rule_id, keyword, category_name))
     
     def refresh_budgets(self):
         """Refresh budgets list"""
@@ -2737,6 +2877,11 @@ class BudgetingApp:
         
         self.parent_category_combo['values'] = ["None"] + category_names
         self.parent_category_combo.set("None")
+
+        if hasattr(self, "rule_category_combo"):
+            self.rule_category_combo['values'] = category_names
+            if category_names and self.rule_category_combo.get() not in category_names:
+                self.rule_category_combo.set(category_names[0])
         
         # Set some defaults
         if category_names:
@@ -2794,7 +2939,7 @@ class BudgetingApp:
             return
         
         # Get category ID
-        category = self.db.get_category_by_name(category_name)
+        category = self.system.get_category_by_name(category_name)
         if not category:
             messagebox.showerror("Error", "Invalid category")
             return
@@ -2872,22 +3017,21 @@ class BudgetingApp:
         tag_entry.insert(0, trans[7] or "")
         
         def save_changes():
-            try:
-                new_date = date_entry.get()
-                new_desc = desc_entry.get()
-                new_amount = float(amount_entry.get())
-                new_tag = tag_entry.get()
-                
-                # Update transaction
-                self.system.db.update_transaction(
-                    trans_id, trans[2], new_date, new_desc, new_amount, new_tag
-                )
-                
-                messagebox.showinfo("Success", "Transaction updated")
+            new_date = date_entry.get()
+            new_desc = desc_entry.get()
+            new_amount = amount_entry.get()
+            new_tag = tag_entry.get()
+
+            success, message = self.system.update_transaction(
+                trans_id, trans[2], new_date, new_desc, new_amount, new_tag
+            )
+
+            if success:
+                messagebox.showinfo("Success", message)
                 dialog.destroy()
                 self.refresh_data()
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+            else:
+                messagebox.showerror("Error", message)
         
         ttk.Button(dialog, text="Save Changes", command=save_changes).pack(pady=20)
     
@@ -2922,7 +3066,7 @@ class BudgetingApp:
         
         category_id = None
         if category != "All":
-            cat = self.system.db.get_category_by_name(category)
+            cat = self.system.get_category_by_name(category)
             if cat:
                 category_id = cat[0]
         
@@ -2960,8 +3104,10 @@ class BudgetingApp:
         try:
             df = pd.read_csv(filename)
             
-            # Map CSV columns to our format (assuming standard columns)
-            required_columns = ['date', 'description', 'amount', 'category', 'type']
+            schema = self.system.get_csv_import_schema()
+            required_columns = schema.get("required", [])
+            optional_columns = schema.get("optional", [])
+            suggested_mapping = self.system.suggest_csv_mapping(list(df.columns))
             
             # Show column mapping dialog
             dialog = tk.Toplevel(self.root)
@@ -2969,58 +3115,106 @@ class BudgetingApp:
             dialog.geometry("500x400")
             dialog.transient(self.root)
             
-            ttk.Label(dialog, text="Map your CSV columns to the required fields:", font=("Helvetica", 10, "bold")).pack(pady=10)
+            ttk.Label(
+                dialog,
+                text="Map your CSV columns to the fields (optional where noted):",
+                font=("Helvetica", 10, "bold")
+            ).pack(pady=10)
             
             mapping_frame = ttk.Frame(dialog, padding=10)
             mapping_frame.pack(fill="both", expand=True)
             
             column_vars = {}
-            for i, req_col in enumerate(required_columns):
-                ttk.Label(mapping_frame, text=f"{req_col}:").grid(row=i, column=0, sticky="w", pady=5)
+            all_fields = required_columns + optional_columns
+            for i, field in enumerate(all_fields):
+                label_text = field
+                if field in optional_columns:
+                    label_text = f"{field} (optional)"
+                ttk.Label(mapping_frame, text=f"{label_text}:").grid(row=i, column=0, sticky="w", pady=5)
                 var = tk.StringVar()
                 combo = ttk.Combobox(mapping_frame, values=list(df.columns), width=30, textvariable=var)
                 combo.grid(row=i, column=1, pady=5, padx=5)
-                if req_col in df.columns:
-                    var.set(req_col)
-                column_vars[req_col] = var
+                if field in suggested_mapping:
+                    var.set(suggested_mapping[field])
+                elif field in df.columns:
+                    var.set(field)
+                column_vars[field] = var
             
             def process_import():
                 try:
                     # Get mapping
-                    mapping = {k: v.get() for k, v in column_vars.items()}
+                    mapping = {
+                        k: (v.get() if v.get().strip() else "")
+                        for k, v in column_vars.items()
+                    }
                     
                     # Check if all required columns are mapped
-                    if not all(mapping.values()):
-                        messagebox.showerror("Error", "Please map all required columns")
+                    missing = [field for field in required_columns if not mapping.get(field)]
+                    if missing:
+                        messagebox.showerror(
+                            "Error",
+                            f"Please map all required columns: {', '.join(missing)}"
+                        )
+                        return
+                    
+                    # Parse and validate rows
+                    records = df.to_dict(orient="records")
+                    parsed_rows, errors = self.system.parse_csv_rows(records, mapping)
+                    
+                    if errors:
+                        preview = "\n".join(errors[:5])
+                        messagebox.showwarning(
+                            "Import Warnings",
+                            f"Some rows were skipped:\n{preview}"
+                        )
+                    
+                    if not parsed_rows:
+                        messagebox.showerror("Import Error", "No valid rows to import.")
                         return
                     
                     # Import each row
                     imported = 0
-                    skipped = 0
+                    skipped = len(errors)
                     
-                    for _, row in df.iterrows():
+                    for row in parsed_rows:
                         try:
-                            date = row[mapping['date']]
-                            description = row[mapping['description']]
-                            amount = float(row[mapping['amount']])
-                            category_name = row[mapping['category']]
-                            trans_type = row[mapping['type']].lower()
+                            date = row["date"]
+                            description = row["description"]
+                            amount = row["amount"]
+                            category_name = row["category"]
+                            trans_type = row["type"]
+                            tag = row["tag"]
                             
                             # Get or create category
-                            category = self.system.db.get_category_by_name(category_name)
+                            category = self.system.get_category_by_name(category_name)
                             if not category:
                                 # Auto-create category
                                 cat_type = 'income' if trans_type == 'income' else 'expense'
-                                cat_id = self.system.db.create_category(category_name, cat_type)
+                                cat_id = self.system.db.create_category(
+                                    category_name,
+                                    cat_type,
+                                    None,
+                                    self.system.current_user_id
+                                )
                             else:
                                 cat_id = category[0]
                             
-                            # Add transaction
-                            self.system.db.create_transaction(
-                                self.system.current_user_id, cat_id,
-                                date, description, amount, trans_type, None, None
+                            # Add transaction with default rules applied.
+                            success, message = self.system.add_transaction(
+                                cat_id,
+                                date,
+                                description,
+                                amount,
+                                trans_type,
+                                tag,
+                                None,
+                                apply_defaults=True
                             )
-                            imported += 1
+                            if success:
+                                imported += 1
+                            else:
+                                print(f"Skipped row: {message}")
+                                skipped += 1
                         except Exception as e:
                             print(f"Skipped row: {e}")
                             skipped += 1
@@ -3049,7 +3243,7 @@ class BudgetingApp:
         
         parent_id = None
         if parent_name != "None":
-            parent = self.system.db.get_category_by_name(parent_name)
+            parent = self.system.get_category_by_name(parent_name)
             if parent:
                 parent_id = parent[0]
         
@@ -3114,7 +3308,7 @@ class BudgetingApp:
             
             parent_id = None
             if parent_name != "None":
-                parent = self.system.db.get_category_by_name(parent_name)
+                parent = self.system.get_category_by_name(parent_name)
                 parent_id = parent[0] if parent else None
             
             if parent_id and not self._is_valid_category_parent(category_id, parent_id):
@@ -3148,6 +3342,45 @@ class BudgetingApp:
                 self.refresh_data()
             else:
                 messagebox.showerror("Error", message)
+
+    def add_default_rule(self):
+        """Add a default categorisation rule."""
+        keyword = self.rule_keyword_entry.get().strip()
+        category_name = self.rule_category_combo.get().strip()
+
+        if not keyword or not category_name:
+            messagebox.showerror("Error", "Please provide a keyword and category")
+            return
+
+        category = self.system.get_category_by_name(category_name)
+        if not category:
+            messagebox.showerror("Error", "Invalid category")
+            return
+
+        success, message = self.system.create_default_rule(keyword, category[0])
+        if success:
+            messagebox.showinfo("Success", message)
+            self.rule_keyword_entry.delete(0, tk.END)
+            self.refresh_default_rules()
+        else:
+            messagebox.showerror("Error", message)
+
+    def delete_default_rule(self):
+        """Delete the selected default rule."""
+        selection = self.rules_tree.selection() if hasattr(self, "rules_tree") else ()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a rule to delete")
+            return
+
+        item = self.rules_tree.item(selection[0])
+        rule_id = item['values'][0]
+        if messagebox.askyesno("Confirm Delete", "Delete this default rule?"):
+            success, message = self.system.delete_default_rule(rule_id)
+            if success:
+                messagebox.showinfo("Success", message)
+                self.refresh_default_rules()
+            else:
+                messagebox.showerror("Error", message)
     
     def add_budget(self):
         """Add new budget"""
@@ -3161,7 +3394,7 @@ class BudgetingApp:
             return
         
         # Get category ID
-        category = self.system.db.get_category_by_name(category_name)
+        category = self.system.get_category_by_name(category_name)
         if not category:
             messagebox.showerror("Error", "Invalid category")
             return
@@ -3227,7 +3460,7 @@ class BudgetingApp:
         
         def save_budget():
             category_name = category_var.get()
-            category = self.system.db.get_category_by_name(category_name)
+            category = self.system.get_category_by_name(category_name)
             if not category:
                 status_label.config(text="Invalid category selected.")
                 return
@@ -3282,7 +3515,7 @@ class BudgetingApp:
         # Get category ID if selected
         category_id = None
         if category_name != "None":
-            category = self.system.db.get_category_by_name(category_name)
+            category = self.system.get_category_by_name(category_name)
             if category:
                 category_id = category[0]
         
@@ -3356,7 +3589,7 @@ class BudgetingApp:
                 return
             category_id = None
             if category_choice != "None":
-                category = self.system.db.get_category_by_name(category_choice)
+                category = self.system.get_category_by_name(category_choice)
                 if not category:
                     status_label.config(text="Invalid category selected")
                     return

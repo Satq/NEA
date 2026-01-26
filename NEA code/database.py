@@ -5,6 +5,19 @@ Keeps the same behaviour but explained with clear, student-friendly comments.
 
 import sqlite3
 
+DEFAULT_CATEGORIES = [
+    ("Food", "expense"),
+    ("Transport", "expense"),
+    ("Entertainment", "expense"),
+    ("Utilities", "expense"),
+    ("Healthcare", "expense"),
+    ("Shopping", "expense"),
+    ("Salary", "income"),
+    ("Freelance", "income"),
+    ("Investments", "income"),
+    ("Other Income", "income"),
+]
+
 
 class DatabaseManager:
     """Handles all SQLite reads/writes for users, budgets, and sessions."""
@@ -53,9 +66,12 @@ class DatabaseManager:
                 parent_category_id INTEGER,
                 name TEXT NOT NULL,
                 type TEXT CHECK(type IN ('income', 'expense')),
+                user_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
                 FOREIGN KEY (parent_category_id) REFERENCES categories(category_id)
             )
         """)
+        self._ensure_category_user_column(cursor)
 
         # Transactions table stores every spending or income record.
         cursor.execute("""
@@ -109,15 +125,20 @@ class DatabaseManager:
             )
         """)
 
-        # Default rules table maps keywords to categories for auto-tagging.
+        # Default rules table maps keywords to categories for auto-tagging per user.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS default_rules (
                 rule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
                 keyword TEXT NOT NULL,
                 category_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
                 FOREIGN KEY (category_id) REFERENCES categories(category_id)
             )
         """)
+        self._ensure_default_rules_user_column(cursor)
+        self._seed_default_categories(cursor)
+        self._migrate_categories_to_user_scope(cursor)
 
         # User preferences hold theme, currency, and language.
         cursor.execute("""
@@ -174,6 +195,201 @@ class DatabaseManager:
         columns = [row[1] for row in cursor.fetchall()]
         if "goal_id" not in columns:
             cursor.execute("ALTER TABLE transactions ADD COLUMN goal_id INTEGER")
+
+    def _ensure_category_user_column(self, cursor):
+        """Add user_id column to categories for legacy databases if missing."""
+        cursor.execute("PRAGMA table_info(categories)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "user_id" not in columns:
+            cursor.execute("ALTER TABLE categories ADD COLUMN user_id INTEGER")
+
+    def _ensure_default_rules_user_column(self, cursor):
+        """Add user_id column to default rules for legacy databases if missing."""
+        cursor.execute("PRAGMA table_info(default_rules)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "user_id" not in columns:
+            cursor.execute("ALTER TABLE default_rules ADD COLUMN user_id INTEGER")
+
+    def _seed_default_categories(self, cursor):
+        """Ensure the shared default categories exist."""
+        for name, category_type in DEFAULT_CATEGORIES:
+            cursor.execute(
+                """
+                UPDATE categories
+                SET user_id = NULL
+                WHERE name = ? COLLATE NOCASE AND type = ?
+                """,
+                (name, category_type)
+            )
+            cursor.execute(
+                """
+                SELECT category_id FROM categories
+                WHERE name = ? COLLATE NOCASE AND type = ? AND user_id IS NULL
+                """,
+                (name, category_type)
+            )
+            if not cursor.fetchone():
+                cursor.execute(
+                    """
+                    INSERT INTO categories (parent_category_id, name, type, user_id)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (None, name, category_type, None)
+                )
+
+    def _migrate_categories_to_user_scope(self, cursor):
+        """Assign legacy categories to users so they are no longer shared."""
+        cursor.execute("SELECT user_id FROM users")
+        valid_users = {row[0] for row in cursor.fetchall()}
+        if not valid_users:
+            return
+
+        default_pairs = {(name.lower(), category_type) for name, category_type in DEFAULT_CATEGORIES}
+
+        conditions = " OR ".join(["(lower(name) = ? AND type = ?)"] * len(default_pairs))
+        params = []
+        for name, category_type in default_pairs:
+            params.extend([name, category_type])
+
+        query = "SELECT category_id, name, type, parent_category_id FROM categories WHERE user_id IS NULL"
+        if conditions:
+            query += f" AND NOT ({conditions})"
+
+        cursor.execute(query, params)
+        categories = cursor.fetchall()
+
+        for category_id, name, category_type, parent_id in categories:
+            user_ids = self._get_category_user_ids(cursor, category_id, valid_users)
+
+            if len(user_ids) == 1:
+                cursor.execute(
+                    "UPDATE categories SET user_id = ? WHERE category_id = ?",
+                    (user_ids[0], category_id)
+                )
+            elif len(user_ids) > 1:
+                user_ids = sorted(set(user_ids))
+                owner_id = user_ids[0]
+                cursor.execute(
+                    "UPDATE categories SET user_id = ? WHERE category_id = ?",
+                    (owner_id, category_id)
+                )
+                for other_id in user_ids[1:]:
+                    clone_parent = self._resolve_clone_parent(cursor, parent_id, default_pairs)
+                    cursor.execute(
+                        """
+                        INSERT INTO categories (parent_category_id, name, type, user_id)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (clone_parent, name, category_type, other_id)
+                    )
+                    new_category_id = cursor.lastrowid
+                    self._reassign_category_references(
+                        cursor,
+                        category_id,
+                        new_category_id,
+                        other_id
+                    )
+            else:
+                cursor.execute("SELECT user_id FROM users ORDER BY user_id LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    cursor.execute(
+                        "UPDATE categories SET user_id = ? WHERE category_id = ?",
+                        (row[0], category_id)
+                    )
+
+        self._cleanup_category_parents(cursor)
+
+    def _get_category_user_ids(self, cursor, category_id, valid_users):
+        user_ids = set()
+        cursor.execute(
+            "SELECT DISTINCT user_id FROM transactions WHERE category_id = ? AND user_id IS NOT NULL",
+            (category_id,)
+        )
+        user_ids.update(row[0] for row in cursor.fetchall())
+        cursor.execute(
+            "SELECT DISTINCT user_id FROM budgets WHERE category_id = ? AND user_id IS NOT NULL",
+            (category_id,)
+        )
+        user_ids.update(row[0] for row in cursor.fetchall())
+        cursor.execute(
+            "SELECT DISTINCT user_id FROM goals WHERE linked_category = ? AND user_id IS NOT NULL",
+            (category_id,)
+        )
+        user_ids.update(row[0] for row in cursor.fetchall())
+        cursor.execute(
+            "SELECT DISTINCT user_id FROM default_rules WHERE category_id = ? AND user_id IS NOT NULL",
+            (category_id,)
+        )
+        user_ids.update(row[0] for row in cursor.fetchall())
+        return sorted(user_id for user_id in user_ids if user_id in valid_users)
+
+    def _reassign_category_references(self, cursor, old_category_id, new_category_id, user_id):
+        cursor.execute(
+            """
+            UPDATE transactions
+            SET category_id = ?
+            WHERE category_id = ? AND user_id = ?
+            """,
+            (new_category_id, old_category_id, user_id)
+        )
+        cursor.execute(
+            """
+            UPDATE budgets
+            SET category_id = ?
+            WHERE category_id = ? AND user_id = ?
+            """,
+            (new_category_id, old_category_id, user_id)
+        )
+        cursor.execute(
+            """
+            UPDATE goals
+            SET linked_category = ?
+            WHERE linked_category = ? AND user_id = ?
+            """,
+            (new_category_id, old_category_id, user_id)
+        )
+        cursor.execute(
+            """
+            UPDATE default_rules
+            SET category_id = ?
+            WHERE category_id = ? AND user_id = ?
+            """,
+            (new_category_id, old_category_id, user_id)
+        )
+
+    def _resolve_clone_parent(self, cursor, parent_id, default_pairs):
+        if not parent_id:
+            return None
+        cursor.execute(
+            "SELECT name, type FROM categories WHERE category_id = ?",
+            (parent_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        parent_name, parent_type = row
+        if (parent_name.lower(), parent_type) in default_pairs:
+            return parent_id
+        return None
+
+    def _cleanup_category_parents(self, cursor):
+        """Remove parent links that cross user boundaries."""
+        cursor.execute(
+            """
+            SELECT c.category_id
+            FROM categories c
+            JOIN categories p ON c.parent_category_id = p.category_id
+            WHERE c.user_id IS NOT NULL
+              AND p.user_id IS NOT NULL
+              AND c.user_id != p.user_id
+            """
+        )
+        for (category_id,) in cursor.fetchall():
+            cursor.execute(
+                "UPDATE categories SET parent_category_id = NULL WHERE category_id = ?",
+                (category_id,)
+            )
 
     # -----------------------
     # Query helper
@@ -273,21 +489,36 @@ class DatabaseManager:
     # -----------------------
     # Category management
     # -----------------------
-    def create_category(self, name, category_type, parent_id=None):
+    def create_category(self, name, category_type, parent_id=None, user_id=None):
         """Add a new category (optionally under a parent)."""
-        query = "INSERT INTO categories (name, type, parent_category_id) VALUES (?, ?, ?)"
-        return self.execute_query(query, (name, category_type, parent_id))
+        query = "INSERT INTO categories (name, type, parent_category_id, user_id) VALUES (?, ?, ?, ?)"
+        return self.execute_query(query, (name, category_type, parent_id, user_id))
 
-    def get_all_categories(self, category_type=None):
+    def get_all_categories(self, category_type=None, user_id=None):
         """Return all categories or filter by type."""
+        if user_id is not None:
+            if category_type:
+                query = "SELECT * FROM categories WHERE type = ? AND (user_id = ? OR user_id IS NULL)"
+                return self.execute_query(query, (category_type, user_id), fetch_all=True)
+            query = "SELECT * FROM categories WHERE user_id = ? OR user_id IS NULL"
+            return self.execute_query(query, (user_id,), fetch_all=True)
         if category_type:
             query = "SELECT * FROM categories WHERE type = ?"
             return self.execute_query(query, (category_type,), fetch_all=True)
         query = "SELECT * FROM categories"
         return self.execute_query(query, fetch_all=True)
 
-    def get_category_by_name(self, name):
+    def get_category_by_name(self, name, user_id=None):
         """Find a single category by its name."""
+        if user_id is not None:
+            query = """
+                SELECT * FROM categories
+                WHERE name = ? COLLATE NOCASE
+                AND (user_id = ? OR user_id IS NULL)
+                ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END
+                LIMIT 1
+            """
+            return self.execute_query(query, (name, user_id, user_id), fetch_one=True)
         query = "SELECT * FROM categories WHERE name = ? COLLATE NOCASE"
         return self.execute_query(query, (name,), fetch_one=True)
 
@@ -446,20 +677,40 @@ class DatabaseManager:
     # -----------------------
     # Default rules
     # -----------------------
-    def create_default_rule(self, keyword, category_id):
+    def create_default_rule(self, keyword, category_id, user_id=None):
         """Add an auto-categorisation rule."""
-        query = "INSERT INTO default_rules (keyword, category_id) VALUES (?, ?)"
-        return self.execute_query(query, (keyword, category_id))
+        query = "INSERT INTO default_rules (user_id, keyword, category_id) VALUES (?, ?, ?)"
+        return self.execute_query(query, (user_id, keyword, category_id))
 
-    def get_default_rules(self):
+    def get_default_rules(self, user_id=None):
         """Return all default rules."""
-        query = "SELECT * FROM default_rules"
+        select_cols = "rule_id, user_id, keyword, category_id"
+        if user_id:
+            query = f"SELECT {select_cols} FROM default_rules WHERE user_id = ? OR user_id IS NULL"
+            return self.execute_query(query, (user_id,), fetch_all=True)
+        query = f"SELECT {select_cols} FROM default_rules"
         return self.execute_query(query, fetch_all=True)
 
-    def get_rule_by_keyword(self, keyword):
+    def get_rule_by_keyword(self, keyword, user_id=None):
         """Find a rule by its keyword."""
-        query = "SELECT * FROM default_rules WHERE keyword = ?"
+        select_cols = "rule_id, user_id, keyword, category_id"
+        if user_id:
+            query = (
+                f"SELECT {select_cols} FROM default_rules "
+                "WHERE keyword = ? COLLATE NOCASE AND user_id = ?"
+            )
+            return self.execute_query(query, (keyword, user_id), fetch_one=True)
+        query = f"SELECT {select_cols} FROM default_rules WHERE keyword = ? COLLATE NOCASE"
         return self.execute_query(query, (keyword,), fetch_one=True)
+
+    def delete_default_rule(self, rule_id, user_id=None):
+        """Remove a default rule."""
+        if user_id:
+            query = "DELETE FROM default_rules WHERE rule_id = ? AND user_id = ?"
+            self.execute_query(query, (rule_id, user_id))
+            return
+        query = "DELETE FROM default_rules WHERE rule_id = ?"
+        self.execute_query(query, (rule_id,))
 
     # -----------------------
     # User preferences

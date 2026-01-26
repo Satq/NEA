@@ -4,6 +4,7 @@ Business logic for the Smart Budgeting System.
 
 import datetime
 import csv
+import math
 # ReportLab imports - package is required (listed in requirements.txt)
 from reportlab.lib import colors  # type: ignore
 from reportlab.lib.pagesizes import letter  # type: ignore
@@ -33,6 +34,7 @@ class BudgetingSystem:
         self.password_attempt_limit = 5
         self.password_lock_minutes = 10
         self.category_name_max_length = 40
+        self.rule_keyword_max_length = 60
     
     # -----------------------
     # User Management
@@ -244,26 +246,315 @@ class BudgetingSystem:
                 f"Category name must be {self.category_name_max_length} characters or fewer"
             )
         return True, ""
+
+    def _normalise_rule_keyword(self, keyword):
+        if not isinstance(keyword, str):
+            return ""
+        return " ".join(keyword.strip().lower().split())
+
+    def _validate_rule_keyword(self, keyword):
+        if not keyword:
+            return False, "Keyword cannot be empty"
+        if keyword.isdigit():
+            return False, "Keyword cannot be only numbers"
+        if len(keyword) > self.rule_keyword_max_length:
+            return False, (
+                f"Keyword must be {self.rule_keyword_max_length} characters or fewer"
+            )
+        return True, ""
+
+    def get_default_rules(self):
+        """Get default categorisation rules for the current user."""
+        if not self.current_user_id:
+            return []
+        return self.db.get_default_rules(self.current_user_id)
+
+    def create_default_rule(self, keyword, category_id):
+        """Create a default rule that maps a keyword to a category."""
+        if not self.current_user_id:
+            return False, "Not logged in"
+        keyword = self._normalise_rule_keyword(keyword)
+        is_valid, message = self._validate_rule_keyword(keyword)
+        if not is_valid:
+            return False, message
+        category = self.db.get_category_by_id(category_id)
+        if not category:
+            return False, "Category not found"
+        existing = self.db.get_rule_by_keyword(keyword, self.current_user_id)
+        if existing:
+            return False, "Rule already exists for this keyword"
+        self.db.create_default_rule(keyword, category_id, self.current_user_id)
+        return True, "Rule added successfully"
+
+    def delete_default_rule(self, rule_id):
+        """Delete a default rule by id."""
+        if not self.current_user_id:
+            return False, "Not logged in"
+        self.db.delete_default_rule(rule_id, self.current_user_id)
+        return True, "Rule deleted successfully"
+
+    def resolve_default_category(self, description, category_id):
+        """Resolve category based on default rules for a description."""
+        return self._apply_default_rules(description, category_id)
+
+    def get_csv_import_schema(self):
+        """Return CSV fields and header aliases for import mapping."""
+        return {
+            "required": ["date", "description", "amount", "category", "type"],
+            "optional": ["tag"],
+            "aliases": {
+                "date": ["date", "transaction date", "posted date", "posting date", "timestamp"],
+                "description": ["description", "details", "memo", "narrative", "payee", "merchant"],
+                "amount": ["amount", "value", "amt", "total"],
+                "category": ["category", "cat", "category name"],
+                "type": ["type", "transaction type", "trans type", "kind"],
+                "tag": ["tag", "tags", "label", "labels"],
+            },
+        }
+
+    def suggest_csv_mapping(self, headers):
+        """Suggest a mapping of schema fields to CSV headers."""
+        if not headers:
+            return {}
+        schema = self.get_csv_import_schema()
+        fields = schema["required"] + schema.get("optional", [])
+        aliases = schema.get("aliases", {})
+        normalised_headers = {
+            self._normalise_csv_header(header): header for header in headers
+        }
+        mapping = {}
+        for field in fields:
+            for alias in aliases.get(field, []):
+                for normalised, original in normalised_headers.items():
+                    normalised_padded = f" {normalised} "
+                    alias_padded = f" {alias} "
+                    if alias == normalised or alias_padded in normalised_padded:
+                        mapping[field] = original
+                        break
+                if field in mapping:
+                    break
+        return mapping
+
+    def parse_csv_rows(self, rows, mapping):
+        """Parse CSV rows into validated transaction records."""
+        schema = self.get_csv_import_schema()
+        required_fields = set(schema.get("required", []))
+        parsed_rows = []
+        errors = []
+
+        for row_number, row in enumerate(rows, start=1):
+            row_errors = []
+
+            date_value = self._get_csv_value(row, mapping.get("date"))
+            if self._is_missing_csv_value(date_value):
+                if "date" in required_fields:
+                    row_errors.append("Missing date")
+                parsed_date = None
+            else:
+                try:
+                    parsed_date = self._parse_csv_date(date_value)
+                except ValueError as exc:
+                    row_errors.append(str(exc))
+                    parsed_date = None
+
+            description_value = self._get_csv_value(row, mapping.get("description"))
+            if self._is_missing_csv_value(description_value):
+                if "description" in required_fields:
+                    row_errors.append("Missing description")
+                description = ""
+            else:
+                description = str(description_value).strip()
+
+            amount_value = self._get_csv_value(row, mapping.get("amount"))
+            if self._is_missing_csv_value(amount_value):
+                if "amount" in required_fields:
+                    row_errors.append("Missing amount")
+                amount = None
+            else:
+                try:
+                    amount = self._parse_csv_amount(amount_value)
+                except ValueError as exc:
+                    row_errors.append(str(exc))
+                    amount = None
+
+            category_value = self._get_csv_value(row, mapping.get("category"))
+            if self._is_missing_csv_value(category_value):
+                if "category" in required_fields:
+                    row_errors.append("Missing category")
+                category_name = ""
+            else:
+                category_name = self._normalise_category_name(str(category_value))
+                is_valid, message = self._validate_category_name(category_name)
+                if not is_valid:
+                    row_errors.append(message)
+
+            type_value = self._get_csv_value(row, mapping.get("type"))
+            if self._is_missing_csv_value(type_value):
+                type_missing = True
+                trans_type = None
+            else:
+                type_missing = False
+                trans_type = self._normalise_transaction_type(type_value)
+                if not trans_type:
+                    row_errors.append("Invalid transaction type")
+
+            if amount is not None:
+                if amount == 0:
+                    row_errors.append("Amount must be positive")
+                amount = abs(amount)
+
+            if type_missing and not trans_type:
+                row_errors.append("Missing transaction type")
+
+            tag_value = self._get_csv_value(row, mapping.get("tag"))
+            tag = None
+            if not self._is_missing_csv_value(tag_value):
+                tag = str(tag_value).strip() or None
+
+            if row_errors:
+                errors.append(f"Row {row_number}: " + "; ".join(row_errors))
+                continue
+
+            parsed_rows.append({
+                "date": parsed_date,
+                "description": description,
+                "amount": amount,
+                "category": category_name,
+                "type": trans_type,
+                "tag": tag,
+            })
+
+        return parsed_rows, errors
+
+    def _normalise_csv_header(self, header):
+        return " ".join(str(header).strip().lower().replace("_", " ").split())
+
+    def _is_missing_csv_value(self, value):
+        if value is None:
+            return True
+        if isinstance(value, float) and math.isnan(value):
+            return True
+        text = str(value).strip().lower()
+        if text in ("", "nan", "nat", "none"):
+            return True
+        return False
+
+    def _get_csv_value(self, row, column):
+        if not column or not isinstance(row, dict):
+            return None
+        if column in row:
+            return row.get(column)
+        if isinstance(column, str):
+            for key, value in row.items():
+                if str(key) == column:
+                    return value
+        return None
+
+    def _parse_csv_date(self, value):
+        if hasattr(value, "to_pydatetime"):
+            value = value.to_pydatetime()
+        if isinstance(value, datetime.datetime):
+            return value.date().strftime("%Y-%m-%d")
+        if isinstance(value, datetime.date):
+            return value.strftime("%Y-%m-%d")
+        text = str(value).strip()
+        if not text:
+            raise ValueError("Missing date")
+        try:
+            return datetime.datetime.fromisoformat(text).date().strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+        formats = [
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+            "%d-%m-%Y",
+            "%m-%d-%Y",
+            "%d.%m.%Y",
+            "%Y/%m/%d",
+        ]
+        for fmt in formats:
+            try:
+                return datetime.datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        raise ValueError("Invalid date format. Use YYYY-MM-DD or a common local format.")
+
+    def _parse_csv_amount(self, value):
+        if self._is_missing_csv_value(value):
+            raise ValueError("Missing amount")
+        text = str(value).strip()
+        negative = False
+        if text.startswith("(") and text.endswith(")"):
+            negative = True
+            text = text[1:-1]
+        cleaned = "".join(ch for ch in text if ch.isdigit() or ch in ",.-")
+        if cleaned.count(",") == 1 and cleaned.count(".") == 0:
+            cleaned = cleaned.replace(",", ".")
+        cleaned = cleaned.replace(",", "")
+        if cleaned in ("", "-", ".", "-."):
+            raise ValueError("Invalid amount format")
+        try:
+            amount = float(cleaned)
+        except ValueError:
+            raise ValueError("Invalid amount format")
+        if negative:
+            amount = -amount
+        return amount
+
+    def _normalise_transaction_type(self, value):
+        if self._is_missing_csv_value(value):
+            return None
+        text = str(value).strip().lower()
+        aliases = {
+            "income": "income",
+            "expense": "expense",
+            "credit": "income",
+            "cr": "income",
+            "deposit": "income",
+            "in": "income",
+            "debit": "expense",
+            "dr": "expense",
+            "withdrawal": "expense",
+            "payment": "expense",
+            "purchase": "expense",
+            "out": "expense",
+        }
+        return aliases.get(text)
     
     # Category Management
     def create_category(self, name, category_type, parent_id=None):
         """Create new category"""
+        if not self.current_user_id:
+            return False, "Not logged in"
         name = self._normalise_category_name(name)
         is_valid, message = self._validate_category_name(name)
         if not is_valid:
             return False, message
         if category_type not in ("income", "expense"):
             return False, "Invalid category type"
-        if self.db.get_category_by_name(name):
+        if self.db.get_category_by_name(name, self.current_user_id):
             return False, "Category already exists"
+        if parent_id:
+            parent = self.db.get_category_by_id(parent_id)
+            if not parent:
+                return False, "Selected parent does not exist"
+            if parent[4] is not None and parent[4] != self.current_user_id:
+                return False, "Selected parent does not exist"
         
-        category_id = self.db.create_category(name, category_type, parent_id)
+        category_id = self.db.create_category(name, category_type, parent_id, self.current_user_id)
         return True, f"Category '{name}' created successfully"
     
     def update_category(self, category_id, name, category_type, parent_id=None):
         """Update existing category"""
         category = self.db.get_category_by_id(category_id)
         if not category:
+            return False, "Category not found"
+        if not self.current_user_id:
+            return False, "Not logged in"
+        if category[4] is None:
+            return False, "Default categories cannot be edited"
+        if category[4] != self.current_user_id:
             return False, "Category not found"
 
         name = self._normalise_category_name(name)
@@ -273,7 +564,7 @@ class BudgetingSystem:
         if category_type not in ("income", "expense"):
             return False, "Invalid category type"
 
-        existing = self.db.get_category_by_name(name)
+        existing = self.db.get_category_by_name(name, self.current_user_id)
         if existing and existing[0] != category_id:
             return False, "Category already exists"
         
@@ -284,6 +575,8 @@ class BudgetingSystem:
         if parent_id:
             parent = self.db.get_category_by_id(parent_id)
             if not parent:
+                return False, "Selected parent does not exist"
+            if parent[4] is not None and parent[4] != self.current_user_id:
                 return False, "Selected parent does not exist"
             
             current_parent = parent[1]
@@ -298,22 +591,47 @@ class BudgetingSystem:
     
     def get_categories(self, category_type=None):
         """Get all categories for current user"""
-        return self.db.get_all_categories(category_type)
+        if not self.current_user_id:
+            return []
+        return self.db.get_all_categories(category_type, self.current_user_id)
     
     def delete_category(self, category_id):
         """Delete category if no transactions exist"""
+        category = self.db.get_category_by_id(category_id)
+        if not category:
+            return False, "Category not found"
+        if not self.current_user_id:
+            return False, "Not logged in"
+        if category[4] is None:
+            return False, "Default categories cannot be deleted"
+        if category[4] != self.current_user_id:
+            return False, "Category not found"
         # Check for linked transactions
         query = "SELECT COUNT(*) FROM transactions WHERE category_id = ?"
         count = self.db.execute_query(query, (category_id,), fetch_one=True)[0]
         
         if count > 0:
             return False, "Cannot delete category with linked transactions"
+
+        rule_count = self.db.execute_query(
+            "SELECT COUNT(*) FROM default_rules WHERE category_id = ? AND user_id = ?",
+            (category_id, self.current_user_id),
+            fetch_one=True
+        )[0]
+        if rule_count > 0:
+            return False, "Cannot delete category linked to default rules"
         
         self.db.delete_category(category_id)
         return True, "Category deleted successfully"
+
+    def get_category_by_name(self, name):
+        """Get a category by name for the current user."""
+        if not self.current_user_id:
+            return None
+        return self.db.get_category_by_name(name, self.current_user_id)
     
     # Transaction Management
-    def add_transaction(self, category_id, date, description, amount, trans_type, tag=None, goal_id=None):
+    def add_transaction(self, category_id, date, description, amount, trans_type, tag=None, goal_id=None, apply_defaults=False):
         """Add new transaction with validation"""
         if not self.current_user_id:
             return False, "Not logged in"
@@ -332,9 +650,9 @@ class BudgetingSystem:
         except:
             return False, "Invalid date format. Use YYYY-MM-DD"
         
-        # Auto-categorize if tag provided
-        if tag:
-            self._apply_default_rules(description, category_id)
+        # Apply default rules when requested.
+        if apply_defaults:
+            category_id = self._apply_default_rules(description, category_id)
         
         # Save transaction
         trans_id = self.db.create_transaction(
@@ -350,13 +668,44 @@ class BudgetingSystem:
         self._check_budget_alerts(category_id)
         
         return True, "Transaction added successfully"
+
+    def update_transaction(self, transaction_id, category_id, date, description, amount, tag=None):
+        """Update an existing transaction with validation."""
+        if not self.current_user_id:
+            return False, "Not logged in"
+
+        transaction = self.db.get_transaction_by_id(transaction_id)
+        if not transaction or transaction[1] != self.current_user_id:
+            return False, "Transaction not found"
+
+        try:
+            amount = float(amount)
+            if amount <= 0:
+                return False, "Amount must be positive"
+        except:
+            return False, "Invalid amount format"
+
+        try:
+            datetime.datetime.strptime(date, "%Y-%m-%d")
+        except:
+            return False, "Invalid date format. Use YYYY-MM-DD"
+
+        self.db.update_transaction(transaction_id, category_id, date, description, amount, tag)
+        return True, "Transaction updated successfully"
     
     def _apply_default_rules(self, description, category_id):
         """Apply default categorization rules"""
-        rules = self.db.get_default_rules()
-        for rule in rules:
-            if rule[1].lower() in description.lower():
-                return rule[2]  # Return category_id
+        if not description:
+            return category_id
+        rules = self.get_default_rules()
+        if not rules:
+            return category_id
+        description_lower = str(description).lower()
+        sorted_rules = sorted(rules, key=lambda rule: len(rule[2] or ""), reverse=True)
+        for rule in sorted_rules:
+            keyword = (rule[2] or "").lower()
+            if keyword and keyword in description_lower:
+                return rule[3]  # category_id
         return category_id
     
     def _apply_goal_contribution(self, goal_id, amount):
