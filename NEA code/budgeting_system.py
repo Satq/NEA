@@ -306,7 +306,7 @@ class BudgetingSystem:
                 "date": ["date", "transaction date", "posted date", "posting date", "timestamp"],
                 "description": ["description", "details", "memo", "narrative", "payee", "merchant"],
                 "amount": ["amount", "value", "amt", "total"],
-                "category": ["category", "cat", "category name"],
+                "category": ["category", "cat", "category name", "missing category"],
                 "type": ["type", "transaction type", "trans type", "kind"],
                 "tag": ["tag", "tags", "label", "labels"],
             },
@@ -781,6 +781,16 @@ class BudgetingSystem:
                 return False, "Limit must be positive"
         except:
             return False, "Invalid limit amount"
+
+        # Validate dates
+        try:
+            datetime.datetime.strptime(start_date, "%Y-%m-%d")
+            datetime.datetime.strptime(end_date, "%Y-%m-%d")
+        except:
+            return False, "Invalid date format. Use YYYY-MM-DD"
+
+        if end_date < start_date:
+            return False, "End date must be after start date"
         
         # Check for overlapping budgets
         query = """

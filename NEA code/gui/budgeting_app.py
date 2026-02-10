@@ -25,6 +25,15 @@ class BudgetingApp:
         self.system = system
         self.root.title("Smart Budgeting System")
         self.root.geometry("1200x800")
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            try:
+                self.root.attributes("-fullscreen", True)
+            except tk.TclError:
+                self.root.geometry(
+                    f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}"
+                )
         self.root.protocol("WM_DELETE_WINDOW", self._confirm_application_exit)
         prefs = self.system.get_preferences()
         self.current_language = (
@@ -58,6 +67,9 @@ class BudgetingApp:
         self.budget_left_canvas = None
         self.budget_right_canvas = None
         self.budget_small_figs = []
+        self.budget_alerts_var = tk.BooleanVar(value=False)
+        self.budget_alert_interval_ms = 300000  # 5 minutes
+        self._budget_alert_after_id = None
         self.category_palette = [
             "#4c78a8",
             "#f58518",
@@ -86,6 +98,7 @@ class BudgetingApp:
         
         # Load data once the UI is ready.
         self.refresh_data()
+        self._schedule_budget_alerts()
 
     def _configure_notebook_style(self):
         """Create a bold navigation tab style for the main menus."""
@@ -742,13 +755,13 @@ class BudgetingApp:
         self.goal_ring_frame.grid(row=0, column=0, sticky="ew", pady=(0, 15))
         self.goal_ring_frame.columnconfigure(0, weight=1)
         selector_frame = tk.Frame(self.goal_ring_frame, bg="white")
-        selector_frame.pack(fill="x", pady=(0, 6))
+        selector_frame.pack(fill="x", pady=(2, 6))
         tk.Label(
             selector_frame,
             text="Viewing:",
             font=("Helvetica", 10, "bold"),
             bg="white"
-        ).pack(side="left")
+        ).pack(side="left", pady=1)
         self.goal_selector_var = tk.StringVar()
         self.goal_selector_combo = ttk.Combobox(
             selector_frame,
@@ -756,7 +769,7 @@ class BudgetingApp:
             state="readonly",
             width=16
         )
-        self.goal_selector_combo.pack(side="left", padx=6)
+        self.goal_selector_combo.pack(side="left", padx=(6, 0), pady=1)
         self.goal_selector_combo.bind("<<ComboboxSelected>>", self._on_goal_selection)
         self.goal_ring_label = tk.Label(
             self.goal_ring_frame,
@@ -1395,6 +1408,7 @@ class BudgetingApp:
         header = ttk.Frame(self.budgets_frame, padding=(5, 8))
         header.grid(row=0, column=0, columnspan=2, sticky="ew")
         header.columnconfigure(0, weight=1)
+        header.columnconfigure(1, weight=0)
 
         self.budgets_title = tk.Label(
             header,
@@ -1405,6 +1419,30 @@ class BudgetingApp:
 
         self.budgets_period_label = ttk.Label(header, text="", font=("Helvetica", 11))
         self.budgets_period_label.grid(row=1, column=0, sticky="w")
+
+        filter_bar = ttk.Frame(header)
+        filter_bar.grid(row=0, column=1, rowspan=2, sticky="e")
+
+        ttk.Label(filter_bar, text="From").grid(row=0, column=0, padx=(0, 4))
+        self.budget_from_entry = ttk.Entry(filter_bar, width=12)
+        self.budget_from_entry.grid(row=0, column=1, padx=(0, 8))
+
+        ttk.Label(filter_bar, text="To").grid(row=0, column=2, padx=(0, 4))
+        self.budget_to_entry = ttk.Entry(filter_bar, width=12)
+        self.budget_to_entry.grid(row=0, column=3, padx=(0, 8))
+
+        ttk.Button(filter_bar, text="Apply", command=self.apply_budget_date_range).grid(
+            row=0, column=4, padx=(0, 6)
+        )
+        ttk.Button(filter_bar, text="Clear", command=self.clear_budget_date_range).grid(
+            row=0, column=5
+        )
+
+        ttk.Checkbutton(
+            filter_bar,
+            text="Mute alerts (session)",
+            variable=self.budget_alerts_var
+        ).grid(row=1, column=0, columnspan=6, sticky="e", pady=(4, 0))
 
         visuals_panel = ttk.Frame(self.budgets_frame, padding=10)
         visuals_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
@@ -1613,12 +1651,7 @@ class BudgetingApp:
         ttk.Label(add_frame, text="Target Date:").grid(row=3, column=0, sticky="w", pady=5)
         self.goal_date_entry = ttk.Entry(add_frame, width=18)
         self.goal_date_entry.grid(row=3, column=1, pady=5, padx=5)
-
-        ttk.Label(add_frame, text="Linked Category:").grid(row=4, column=0, sticky="w", pady=5)
-        self.goal_category_combo = ttk.Combobox(add_frame, width=23, state="readonly")
-        self.goal_category_combo.grid(row=4, column=1, pady=5, padx=5)
-
-        ttk.Button(add_frame, text="Add Goal", command=self.add_goal).grid(row=5, column=0, columnspan=2, pady=10)
+        ttk.Button(add_frame, text="Add Goal", command=self.add_goal).grid(row=4, column=0, columnspan=2, pady=10)
 
         # Goals list
         list_frame = ttk.LabelFrame(management_panel, text="Goals List", padding=10)
@@ -1832,6 +1865,19 @@ class BudgetingApp:
             self.category_from_entry.insert(0, start_date.strftime("%Y-%m-%d"))
             self.category_to_entry.insert(0, end_date.strftime("%Y-%m-%d"))
 
+    def _sync_budget_date_entries(self, start_date, end_date):
+        """Keep budget date inputs aligned with the active range."""
+        if not hasattr(self, "budget_from_entry"):
+            return
+        focused = self.root.focus_get()
+        if focused in (self.budget_from_entry, self.budget_to_entry):
+            return
+        self.budget_from_entry.delete(0, tk.END)
+        self.budget_to_entry.delete(0, tk.END)
+        if start_date and end_date:
+            self.budget_from_entry.insert(0, start_date.strftime("%Y-%m-%d"))
+            self.budget_to_entry.insert(0, end_date.strftime("%Y-%m-%d"))
+
     def apply_category_date_range(self):
         """Apply date range filters to category analytics."""
         if not hasattr(self, "category_from_entry"):
@@ -1866,6 +1912,138 @@ class BudgetingApp:
             self.category_to_entry.delete(0, tk.END)
         self.category_date_range = (None, None)
         self.refresh_category_charts()
+
+    def apply_budget_date_range(self):
+        """Apply date range filters to budget analytics."""
+        if not hasattr(self, "budget_from_entry"):
+            return
+        from_date = self.budget_from_entry.get().strip()
+        to_date = self.budget_to_entry.get().strip()
+
+        if not from_date and not to_date:
+            self.budget_date_range = (None, None)
+            self.refresh_budget_charts()
+            return
+        if not from_date or not to_date:
+            messagebox.showerror("Error", "Please enter both start and end dates (YYYY-MM-DD).")
+            return
+        try:
+            start_date = datetime.datetime.strptime(from_date, "%Y-%m-%d").date()
+            end_date = datetime.datetime.strptime(to_date, "%Y-%m-%d").date()
+        except ValueError:
+            messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+            return
+        if end_date < start_date:
+            messagebox.showerror("Error", "End date cannot be before start date.")
+            return
+        self.budget_date_range = (start_date, end_date)
+        self.refresh_budget_charts()
+
+    def clear_budget_date_range(self):
+        """Clear date range filters for budget analytics."""
+        if hasattr(self, "budget_from_entry"):
+            self.budget_from_entry.delete(0, tk.END)
+        if hasattr(self, "budget_to_entry"):
+            self.budget_to_entry.delete(0, tk.END)
+        self.budget_date_range = (None, None)
+        self.refresh_budget_charts()
+
+    def _schedule_budget_alerts(self):
+        """Schedule recurring budget alert checks."""
+        if self._budget_alert_after_id:
+            self.root.after_cancel(self._budget_alert_after_id)
+        self._budget_alert_after_id = self.root.after(
+            self.budget_alert_interval_ms,
+            self._budget_alert_tick
+        )
+
+    def _budget_alert_tick(self):
+        """Check budgets and reschedule the next alert tick."""
+        self._budget_alert_after_id = None
+        self._maybe_show_budget_alert()
+        self._schedule_budget_alerts()
+
+    def _maybe_show_budget_alert(self):
+        """Show a budget warning if any active budget exceeds 80%."""
+        if not self.system.current_user_id:
+            return
+        if self.budget_alerts_var.get():
+            return
+
+        budgets = self.system.get_budgets()
+        if not budgets:
+            return
+
+        today = datetime.date.today()
+        active = []
+        for budget in budgets:
+            try:
+                budget_start = datetime.datetime.strptime(budget[4], "%Y-%m-%d").date()
+                budget_end = datetime.datetime.strptime(budget[5], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if budget_start <= today <= budget_end:
+                active.append(
+                    {
+                        "id": budget[0],
+                        "category_id": budget[2],
+                        "limit": float(budget[3] or 0),
+                        "start": budget_start,
+                        "end": budget_end
+                    }
+                )
+
+        if not active:
+            return
+
+        names = [self.get_category_name(b["category_id"]) for b in active]
+        name_counts = {name: names.count(name) for name in names}
+        duplicates = {name for name, count in name_counts.items() if count > 1}
+
+        over_limit = []
+        spending_query = """
+            SELECT SUM(amount) FROM transactions
+            WHERE user_id = ? AND category_id = ?
+            AND date BETWEEN ? AND ?
+            AND type = 'expense'
+        """
+        for budget in active:
+            limit_amount = budget["limit"]
+            if limit_amount <= 0:
+                continue
+            spent = self.db.execute_query(
+                spending_query,
+                (
+                    self.system.current_user_id,
+                    budget["category_id"],
+                    budget["start"].strftime("%Y-%m-%d"),
+                    budget["end"].strftime("%Y-%m-%d")
+                ),
+                fetch_one=True
+            )[0] or 0
+            progress = spent / limit_amount
+            if progress >= 0.8:
+                name = self.get_category_name(budget["category_id"])
+                label = self._format_budget_label(
+                    name,
+                    budget["start"],
+                    budget["end"],
+                    budget["id"],
+                    duplicates
+                )
+                over_limit.append(
+                    (label, float(spent), float(limit_amount), progress)
+                )
+
+        if not over_limit:
+            return
+
+        lines = [
+            f"{label}: {progress * 100:.0f}% ({self._format_currency(spent)} of {self._format_currency(limit)})"
+            for label, spent, limit, progress in over_limit
+        ]
+        message = "Budgets over 80%:\n" + "\n".join(lines)
+        messagebox.showwarning("Budget Alert", message)
 
     def _get_category_date_range(self):
         """Return the active date range for category analytics."""
@@ -2266,6 +2444,7 @@ class BudgetingApp:
             start_date, end_date = self._get_budget_date_range()
             if hasattr(self, "budgets_period_label"):
                 self.budgets_period_label.config(text=self._format_date_range_label(start_date, end_date))
+            self._sync_budget_date_entries(start_date, end_date)
             return
 
         names = [self.get_category_name(budget["category_id"]) for budget in active_budgets]
@@ -2323,6 +2502,7 @@ class BudgetingApp:
         start_date, end_date = self._get_budget_date_range()
         if hasattr(self, "budgets_period_label"):
             self.budgets_period_label.config(text=self._format_date_range_label(start_date, end_date))
+        self._sync_budget_date_entries(start_date, end_date)
     
     def refresh_data(self):
         """Refresh all data displays"""
@@ -2871,9 +3051,6 @@ class BudgetingApp:
         self.filter_category_combo.set("All")
         
         self.budget_category_combo['values'] = category_names
-        
-        self.goal_category_combo['values'] = ["None"] + category_names
-        self.goal_category_combo.set("None")
         
         self.parent_category_combo['values'] = ["None"] + category_names
         self.parent_category_combo.set("None")
@@ -3506,21 +3683,13 @@ class BudgetingApp:
         goal_type = self.goal_type_combo.get()
         target_amount = self.goal_target_entry.get()
         target_date = self.goal_date_entry.get()
-        category_name = self.goal_category_combo.get()
         
         if not all([name, goal_type, target_amount, target_date]):
             messagebox.showerror("Error", "Please fill all required fields")
             return
         
-        # Get category ID if selected
-        category_id = None
-        if category_name != "None":
-            category = self.system.get_category_by_name(category_name)
-            if category:
-                category_id = category[0]
-        
         success, message = self.system.create_goal(
-            name, goal_type, target_amount, target_date, category_id
+            name, goal_type, target_amount, target_date, None
         )
         
         if success:
@@ -3545,7 +3714,7 @@ class BudgetingApp:
             return
         dialog = tk.Toplevel(self.root)
         dialog.title("Edit Goal")
-        dialog.geometry("380x360")
+        dialog.geometry("380x320")
         dialog.transient(self.root)
         ttk.Label(dialog, text="Edit Goal", font=("Helvetica", 14, "bold")).pack(pady=10)
         form = ttk.Frame(dialog, padding=10)
@@ -3566,36 +3735,31 @@ class BudgetingApp:
         date_var = tk.StringVar(value=goal[6])
         date_entry = ttk.Entry(form, textvariable=date_var, width=20)
         date_entry.grid(row=3, column=1, pady=5)
-        ttk.Label(form, text="Linked Category:").grid(row=4, column=0, sticky="w", pady=5)
-        categories = self.system.get_categories()
-        category_names = [c[2] for c in categories]
-        category_options = ["None"] + category_names
-        current_category = self.get_category_name(goal[2])
-        if current_category not in category_options:
-            current_category = "None"
-        category_var = tk.StringVar(value=current_category)
-        category_combo = ttk.Combobox(form, values=category_options, textvariable=category_var, state="readonly", width=27)
-        category_combo.grid(row=4, column=1, pady=5)
         status_label = ttk.Label(form, text="", foreground="red")
-        status_label.grid(row=5, column=0, columnspan=2, pady=5)
+        status_label.grid(row=4, column=0, columnspan=2, pady=5)
         def save_goal():
             name = name_var.get().strip()
             goal_type = type_var.get()
             target_amount = target_var.get()
             target_date = date_var.get()
-            category_choice = category_var.get()
             if not all([name, goal_type, target_amount, target_date]):
                 status_label.config(text="Please fill all required fields")
                 return
-            category_id = None
-            if category_choice != "None":
-                category = self.system.get_category_by_name(category_choice)
-                if not category:
-                    status_label.config(text="Invalid category selected")
-                    return
-                category_id = category[0]
+            try:
+                amount_value = float(target_amount)
+            except ValueError:
+                status_label.config(text="Invalid target amount")
+                return
+            if (
+                name == (goal[3] or "").strip()
+                and goal_type == (goal[4] or "")
+                and amount_value == float(goal[5] or 0)
+                and target_date == (goal[6] or "")
+            ):
+                messagebox.showinfo("No Changes", "No changes to save.")
+                return
             success, message = self.system.update_goal(
-                goal_id, name, goal_type, target_amount, target_date, category_id
+                goal_id, name, goal_type, target_amount, target_date, goal[2]
             )
             if success:
                 messagebox.showinfo("Success", message)
@@ -3603,7 +3767,7 @@ class BudgetingApp:
                 self.refresh_data()
             else:
                 status_label.config(text=message)
-        ttk.Button(form, text="Save Changes", command=save_goal).grid(row=6, column=0, columnspan=2, pady=10)
+        ttk.Button(form, text="Save Changes", command=save_goal).grid(row=5, column=0, columnspan=2, pady=10)
     
     def delete_goal(self):
         """Delete selected goal"""
