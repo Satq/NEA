@@ -138,6 +138,7 @@ class BudgetingApp:
             "Are you sure you want to quit?"
         )
         if answer:
+            self._cancel_budget_alerts()
             self.root.destroy()
     
     def create_menu(self):
@@ -758,7 +759,7 @@ class BudgetingApp:
         selector_frame.pack(fill="x", pady=(2, 6))
         tk.Label(
             selector_frame,
-            text="Viewing:",
+            text=self._t("goal_viewing"),
             font=("Helvetica", 10, "bold"),
             bg="white"
         ).pack(side="left", pady=1)
@@ -1045,7 +1046,7 @@ class BudgetingApp:
 
         list_title = tk.Label(
             list_card,
-            text="Transactions",
+            text=self._t("transactions_tab"),
             bg=surface_bg,
             fg=text_primary,
             font=("Helvetica Neue", 12, "bold")
@@ -1060,7 +1061,7 @@ class BudgetingApp:
 
         tk.Label(
             filter_bar,
-            text="Category:",
+            text=self._t("category_filter_label"),
             bg=surface_header_bg,
             fg=text_muted
         ).grid(row=0, column=0, sticky="w", padx=(0, 4), pady=6)
@@ -1070,7 +1071,7 @@ class BudgetingApp:
 
         tk.Label(
             filter_bar,
-            text="From:",
+            text=f"{self._t('from_label')}:",
             bg=surface_header_bg,
             fg=text_muted
         ).grid(row=0, column=2, sticky="w", padx=(0, 4), pady=6)
@@ -1079,21 +1080,21 @@ class BudgetingApp:
 
         tk.Label(
             filter_bar,
-            text="To:",
+            text=f"{self._t('to_label')}:",
             bg=surface_header_bg,
             fg=text_muted
         ).grid(row=0, column=4, sticky="w", padx=(0, 4), pady=6)
         self.filter_to_entry = ttk.Entry(filter_bar, width=14)
         self.filter_to_entry.grid(row=0, column=5, sticky="ew", padx=(0, 10), pady=6)
 
-        ttk.Button(filter_bar, text="Apply", command=self.apply_transaction_filters).grid(
+        ttk.Button(filter_bar, text=self._t("apply_button"), command=self.apply_transaction_filters).grid(
             row=0,
             column=6,
             sticky="ew",
             padx=(0, 6),
             pady=6
         )
-        ttk.Button(filter_bar, text="Clear", command=self.clear_transaction_filters).grid(
+        ttk.Button(filter_bar, text=self._t("clear_button"), command=self.clear_transaction_filters).grid(
             row=0,
             column=7,
             sticky="ew",
@@ -1169,18 +1170,18 @@ class BudgetingApp:
         filter_bar = ttk.Frame(header)
         filter_bar.grid(row=0, column=1, rowspan=2, sticky="e")
 
-        ttk.Label(filter_bar, text="From").grid(row=0, column=0, padx=(0, 4))
+        ttk.Label(filter_bar, text=self._t("from_label")).grid(row=0, column=0, padx=(0, 4))
         self.category_from_entry = ttk.Entry(filter_bar, width=12)
         self.category_from_entry.grid(row=0, column=1, padx=(0, 8))
 
-        ttk.Label(filter_bar, text="To").grid(row=0, column=2, padx=(0, 4))
+        ttk.Label(filter_bar, text=self._t("to_label")).grid(row=0, column=2, padx=(0, 4))
         self.category_to_entry = ttk.Entry(filter_bar, width=12)
         self.category_to_entry.grid(row=0, column=3, padx=(0, 8))
 
-        ttk.Button(filter_bar, text="Apply", command=self.apply_category_date_range).grid(
+        ttk.Button(filter_bar, text=self._t("apply_button"), command=self.apply_category_date_range).grid(
             row=0, column=4, padx=(0, 6)
         )
-        ttk.Button(filter_bar, text="Clear", command=self.clear_category_date_range).grid(
+        ttk.Button(filter_bar, text=self._t("clear_button"), command=self.clear_category_date_range).grid(
             row=0, column=5
         )
 
@@ -1195,11 +1196,11 @@ class BudgetingApp:
         self.category_tabs = {}
         self.category_tabs["spending"] = self._build_category_analytics_tab(
             self.categories_notebook,
-            "Spending by Category"
+            self._t("categories_spending_by")
         )
         self.category_tabs["income"] = self._build_category_analytics_tab(
             self.categories_notebook,
-            "Income by Category"
+            self._t("categories_income_by")
         )
 
         management_panel = ttk.Frame(self.categories_frame, padding=10)
@@ -1207,28 +1208,28 @@ class BudgetingApp:
         management_panel.columnconfigure(0, weight=1)
 
         # Add Category Frame
-        add_frame = ttk.LabelFrame(management_panel, text="Add Category", padding=10)
+        add_frame = ttk.LabelFrame(management_panel, text=self._t("categories_add_title"), padding=10)
         add_frame.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(add_frame, text="Name:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("categories_name_label")).grid(row=0, column=0, sticky="w", pady=5)
         self.category_name_entry = ttk.Entry(add_frame, width=26)
         self.category_name_entry.grid(row=0, column=1, pady=5, padx=5)
 
-        ttk.Label(add_frame, text="Type:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("categories_type_label")).grid(row=1, column=0, sticky="w", pady=5)
         self.category_type_combo = ttk.Combobox(add_frame, values=["income", "expense"], width=23, state="readonly")
         self.category_type_combo.grid(row=1, column=1, pady=5, padx=5)
         self.category_type_combo.set("expense")
 
-        ttk.Label(add_frame, text="Parent Category (optional):").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("categories_parent_label")).grid(row=2, column=0, sticky="w", pady=5)
         self.parent_category_combo = ttk.Combobox(add_frame, width=23, state="readonly")
         self.parent_category_combo.grid(row=2, column=1, pady=5, padx=5)
 
-        ttk.Button(add_frame, text="Add Category", command=self.add_category).grid(
+        ttk.Button(add_frame, text=self._t("categories_add_title"), command=self.add_category).grid(
             row=3, column=0, columnspan=2, pady=10
         )
 
         # Categories list
-        list_frame = ttk.LabelFrame(management_panel, text="Categories", padding=10)
+        list_frame = ttk.LabelFrame(management_panel, text=self._t("categories_list_title"), padding=10)
         list_frame.pack(fill="both", expand=True)
 
         # Treeview for categories
@@ -1307,16 +1308,16 @@ class BudgetingApp:
         actions_frame.columnconfigure(0, weight=1)
         actions_frame.columnconfigure(1, weight=1)
 
-        ttk.Button(actions_frame, text="Edit Category", command=self.edit_category).grid(
+        ttk.Button(actions_frame, text=self._t("categories_edit_action"), command=self.edit_category).grid(
             row=0, column=0, sticky="ew", padx=2, pady=2
         )
-        ttk.Button(actions_frame, text="Delete Category", command=self.delete_category).grid(
+        ttk.Button(actions_frame, text=self._t("categories_delete_action"), command=self.delete_category).grid(
             row=0, column=1, sticky="ew", padx=2, pady=2
         )
-        ttk.Button(actions_frame, text="View Spending", command=lambda: self.navigate_categories_tab("spending")).grid(
+        ttk.Button(actions_frame, text=self._t("categories_view_spending"), command=lambda: self.navigate_categories_tab("spending")).grid(
             row=1, column=0, sticky="ew", padx=2, pady=(6, 2)
         )
-        ttk.Button(actions_frame, text="View Income", command=lambda: self.navigate_categories_tab("income")).grid(
+        ttk.Button(actions_frame, text=self._t("categories_view_income"), command=lambda: self.navigate_categories_tab("income")).grid(
             row=1, column=1, sticky="ew", padx=2, pady=(6, 2)
         )
 
@@ -1423,24 +1424,24 @@ class BudgetingApp:
         filter_bar = ttk.Frame(header)
         filter_bar.grid(row=0, column=1, rowspan=2, sticky="e")
 
-        ttk.Label(filter_bar, text="From").grid(row=0, column=0, padx=(0, 4))
+        ttk.Label(filter_bar, text=self._t("from_label")).grid(row=0, column=0, padx=(0, 4))
         self.budget_from_entry = ttk.Entry(filter_bar, width=12)
         self.budget_from_entry.grid(row=0, column=1, padx=(0, 8))
 
-        ttk.Label(filter_bar, text="To").grid(row=0, column=2, padx=(0, 4))
+        ttk.Label(filter_bar, text=self._t("to_label")).grid(row=0, column=2, padx=(0, 4))
         self.budget_to_entry = ttk.Entry(filter_bar, width=12)
         self.budget_to_entry.grid(row=0, column=3, padx=(0, 8))
 
-        ttk.Button(filter_bar, text="Apply", command=self.apply_budget_date_range).grid(
+        ttk.Button(filter_bar, text=self._t("apply_button"), command=self.apply_budget_date_range).grid(
             row=0, column=4, padx=(0, 6)
         )
-        ttk.Button(filter_bar, text="Clear", command=self.clear_budget_date_range).grid(
+        ttk.Button(filter_bar, text=self._t("clear_button"), command=self.clear_budget_date_range).grid(
             row=0, column=5
         )
 
         ttk.Checkbutton(
             filter_bar,
-            text="Mute alerts (session)",
+            text=self._t("budget_mute_alerts"),
             variable=self.budget_alerts_var
         ).grid(row=1, column=0, columnspan=6, sticky="e", pady=(4, 0))
 
@@ -1476,7 +1477,7 @@ class BudgetingApp:
 
         center_title = tk.Label(
             center_card,
-            text="Overall Budget",
+            text=self._t("overall_budget_card"),
             bg="white",
             font=("Helvetica Neue", 14, "bold")
         )
@@ -1512,32 +1513,32 @@ class BudgetingApp:
         management_panel.columnconfigure(0, weight=1)
 
         # Add Budget Frame
-        add_frame = ttk.LabelFrame(management_panel, text="Add Budget", padding=10)
+        add_frame = ttk.LabelFrame(management_panel, text=self._t("budget_add_title"), padding=10)
         add_frame.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(add_frame, text="Category:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("budget_category_label")).grid(row=0, column=0, sticky="w", pady=5)
         self.budget_category_combo = ttk.Combobox(add_frame, width=24, state="readonly")
         self.budget_category_combo.grid(row=0, column=1, pady=5, padx=5)
 
-        ttk.Label(add_frame, text="Limit Amount:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("budget_limit_label")).grid(row=1, column=0, sticky="w", pady=5)
         self.budget_limit_entry = ttk.Entry(add_frame, width=18)
         self.budget_limit_entry.grid(row=1, column=1, pady=5, padx=5)
 
-        ttk.Label(add_frame, text="Start Date:").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("budget_start_label")).grid(row=2, column=0, sticky="w", pady=5)
         self.budget_start_entry = ttk.Entry(add_frame, width=18)
         self.budget_start_entry.grid(row=2, column=1, pady=5, padx=5)
         self.budget_start_entry.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
 
-        ttk.Label(add_frame, text="End Date:").grid(row=3, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("budget_end_label")).grid(row=3, column=0, sticky="w", pady=5)
         self.budget_end_entry = ttk.Entry(add_frame, width=18)
         self.budget_end_entry.grid(row=3, column=1, pady=5, padx=5)
 
-        ttk.Button(add_frame, text="Add Budget", command=self.add_budget).grid(
+        ttk.Button(add_frame, text=self._t("budget_add_title"), command=self.add_budget).grid(
             row=4, column=0, columnspan=2, pady=10
         )
 
         # Budgets list
-        list_frame = ttk.LabelFrame(management_panel, text="Active Budgets", padding=10)
+        list_frame = ttk.LabelFrame(management_panel, text=self._t("budget_list_title"), padding=10)
         list_frame.pack(fill="both", expand=True)
 
         self.budgets_tree = ttk.Treeview(
@@ -1563,8 +1564,8 @@ class BudgetingApp:
 
         self.budgets_tree.bind("<Double-1>", self.edit_budget)
         self.budgets_menu = tk.Menu(self.budgets_tree, tearoff=0)
-        self.budgets_menu.add_command(label="Edit Budget", command=self.edit_budget)
-        self.budgets_menu.add_command(label="Delete Budget", command=self.delete_budget)
+        self.budgets_menu.add_command(label=self._t("budget_edit_action"), command=self.edit_budget)
+        self.budgets_menu.add_command(label=self._t("budget_delete_action"), command=self.delete_budget)
         self.budgets_tree.bind(
             "<Button-3>",
             lambda event: self._show_tree_context_menu(event, self.budgets_tree, self.budgets_menu)
@@ -1575,10 +1576,10 @@ class BudgetingApp:
         actions_frame.columnconfigure(0, weight=1)
         actions_frame.columnconfigure(1, weight=1)
 
-        ttk.Button(actions_frame, text="Edit Budget", command=self.edit_budget).grid(
+        ttk.Button(actions_frame, text=self._t("budget_edit_action"), command=self.edit_budget).grid(
             row=0, column=0, sticky="ew", padx=2, pady=2
         )
-        ttk.Button(actions_frame, text="Delete Budget", command=self.delete_budget).grid(
+        ttk.Button(actions_frame, text=self._t("budget_delete_action"), command=self.delete_budget).grid(
             row=0, column=1, sticky="ew", padx=2, pady=2
         )
     
@@ -1604,7 +1605,7 @@ class BudgetingApp:
         left_panel.columnconfigure(0, weight=1)
         left_panel.rowconfigure(1, weight=1)
 
-        ttk.Label(left_panel, text="Goals Overview", font=("Helvetica", 12, "bold")).grid(
+        ttk.Label(left_panel, text=self._t("goals_overview"), font=("Helvetica", 12, "bold")).grid(
             row=0, column=0, sticky="w", pady=(0, 8)
         )
 
@@ -1632,29 +1633,29 @@ class BudgetingApp:
         management_panel.columnconfigure(0, weight=1)
 
         # Add Goal Frame
-        add_frame = ttk.LabelFrame(management_panel, text="Add Goal", padding=10)
+        add_frame = ttk.LabelFrame(management_panel, text=self._t("goals_add_title"), padding=10)
         add_frame.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(add_frame, text="Name:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("goals_name_label")).grid(row=0, column=0, sticky="w", pady=5)
         self.goal_name_entry = ttk.Entry(add_frame, width=26)
         self.goal_name_entry.grid(row=0, column=1, pady=5, padx=5)
 
-        ttk.Label(add_frame, text="Type:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("goals_type_label")).grid(row=1, column=0, sticky="w", pady=5)
         self.goal_type_combo = ttk.Combobox(add_frame, values=["savings", "debt"], width=23, state="readonly")
         self.goal_type_combo.grid(row=1, column=1, pady=5, padx=5)
         self.goal_type_combo.set("savings")
 
-        ttk.Label(add_frame, text="Target Amount:").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("goals_target_amount")).grid(row=2, column=0, sticky="w", pady=5)
         self.goal_target_entry = ttk.Entry(add_frame, width=18)
         self.goal_target_entry.grid(row=2, column=1, pady=5, padx=5)
 
-        ttk.Label(add_frame, text="Target Date:").grid(row=3, column=0, sticky="w", pady=5)
+        ttk.Label(add_frame, text=self._t("goals_target_date")).grid(row=3, column=0, sticky="w", pady=5)
         self.goal_date_entry = ttk.Entry(add_frame, width=18)
         self.goal_date_entry.grid(row=3, column=1, pady=5, padx=5)
-        ttk.Button(add_frame, text="Add Goal", command=self.add_goal).grid(row=4, column=0, columnspan=2, pady=10)
+        ttk.Button(add_frame, text=self._t("goals_add_title"), command=self.add_goal).grid(row=4, column=0, columnspan=2, pady=10)
 
         # Goals list
-        list_frame = ttk.LabelFrame(management_panel, text="Goals List", padding=10)
+        list_frame = ttk.LabelFrame(management_panel, text=self._t("goals_list_title"), padding=10)
         list_frame.pack(fill="both", expand=True)
 
         self.goals_tree = ttk.Treeview(
@@ -1680,8 +1681,8 @@ class BudgetingApp:
 
         self.goals_tree.bind("<Double-1>", self.edit_goal)
         self.goals_menu = tk.Menu(self.goals_tree, tearoff=0)
-        self.goals_menu.add_command(label="Edit Goal", command=self.edit_goal)
-        self.goals_menu.add_command(label="Delete Goal", command=self.delete_goal)
+        self.goals_menu.add_command(label=self._t("goals_edit_action"), command=self.edit_goal)
+        self.goals_menu.add_command(label=self._t("goals_delete_action"), command=self.delete_goal)
         self.goals_tree.bind(
             "<Button-3>",
             lambda event: self._show_tree_context_menu(event, self.goals_tree, self.goals_menu)
@@ -1692,10 +1693,10 @@ class BudgetingApp:
         actions_frame.columnconfigure(0, weight=1)
         actions_frame.columnconfigure(1, weight=1)
 
-        ttk.Button(actions_frame, text="Edit Goal", command=self.edit_goal).grid(
+        ttk.Button(actions_frame, text=self._t("goals_edit_action"), command=self.edit_goal).grid(
             row=0, column=0, sticky="ew", padx=2, pady=2
         )
-        ttk.Button(actions_frame, text="Delete Goal", command=self.delete_goal).grid(
+        ttk.Button(actions_frame, text=self._t("goals_delete_action"), command=self.delete_goal).grid(
             row=0, column=1, sticky="ew", padx=2, pady=2
         )
     
@@ -1847,10 +1848,10 @@ class BudgetingApp:
     def _format_date_range_label(self, start_date, end_date):
         """Format the active date range for the categories header."""
         if not start_date or not end_date:
-            return "Period: All time"
+            return self._t("period_all_time")
         start_label = start_date.strftime("%d %b %Y")
         end_label = end_date.strftime("%d %b %Y")
-        return f"Period: {start_label} - {end_label}"
+        return self._t("period_range").format(start=start_label, end=end_label)
 
     def _sync_category_date_entries(self, start_date, end_date):
         """Keep category date inputs aligned with the active range."""
@@ -1956,6 +1957,15 @@ class BudgetingApp:
             self.budget_alert_interval_ms,
             self._budget_alert_tick
         )
+
+    def _cancel_budget_alerts(self):
+        """Cancel any scheduled budget alert checks."""
+        if not self._budget_alert_after_id:
+            return
+        try:
+            self.root.after_cancel(self._budget_alert_after_id)
+        finally:
+            self._budget_alert_after_id = None
 
     def _budget_alert_tick(self):
         """Check budgets and reschedule the next alert tick."""
@@ -2296,7 +2306,7 @@ class BudgetingApp:
             self.budget_overall_ax.text(
                 0.5,
                 0.5,
-                "Add budgets to\nbuild your donut",
+                self._t("budget_donut_empty"),
                 ha="center",
                 va="center",
                 transform=self.budget_overall_ax.transAxes,
@@ -2313,7 +2323,7 @@ class BudgetingApp:
             self.budget_overall_ax.text(
                 0.5,
                 0.5,
-                "Budgets total\n£0.00",
+                self._t("budget_total_zero"),
                 ha="center",
                 va="center",
                 transform=self.budget_overall_ax.transAxes,
@@ -2592,7 +2602,14 @@ class BudgetingApp:
             self.overall_ax.set_aspect('equal')
         else:
             self.overall_ax.axis('off')
-            self.overall_ax.text(0.5, 0.5, "Add budgets to\nbuild your donut", ha="center", va="center", transform=self.overall_ax.transAxes)
+            self.overall_ax.text(
+                0.5,
+                0.5,
+                self._t("budget_donut_empty"),
+                ha="center",
+                va="center",
+                transform=self.overall_ax.transAxes
+            )
         self.overall_canvas.draw()
         
         # Spending pie
@@ -2617,10 +2634,17 @@ class BudgetingApp:
                 wedgeprops={"width": 0.35, "edgecolor": "white"}
             )
             self.spending_ax.set_aspect('equal')
-            self.spending_ax.set_title("Spending Breakdown")
+            self.spending_ax.set_title(self._t("spending_breakdown"))
         else:
             self.spending_ax.axis('off')
-            self.spending_ax.text(0.5, 0.5, "No expense data yet", ha="center", va="center", transform=self.spending_ax.transAxes)
+            self.spending_ax.text(
+                0.5,
+                0.5,
+                self._t("no_expense_data"),
+                ha="center",
+                va="center",
+                transform=self.spending_ax.transAxes
+            )
         self.spending_canvas.draw()
         
         # Income pie
@@ -2636,10 +2660,17 @@ class BudgetingApp:
                 wedgeprops={"width": 0.35, "edgecolor": "white"}
             )
             self.income_ax.set_aspect('equal')
-            self.income_ax.set_title("Income Sources")
+            self.income_ax.set_title(self._t("income_sources"))
         else:
             self.income_ax.axis('off')
-            self.income_ax.text(0.5, 0.5, "No income data yet", ha="center", va="center", transform=self.income_ax.transAxes)
+            self.income_ax.text(
+                0.5,
+                0.5,
+                self._t("no_income_data"),
+                ha="center",
+                va="center",
+                transform=self.income_ax.transAxes
+            )
         self.income_canvas.draw()
         
         # Update compact goal ring element
@@ -2662,7 +2693,7 @@ class BudgetingApp:
                 else:
                     row["arrow"].config(text="↓", fg="#c0392b")
             else:
-                row["desc"].config(text="No recent activity")
+                row["desc"].config(text=self._t("no_recent_activity"))
                 row["arrow"].config(text="-", fg="#555555")
 
     def _format_goal_label(self, goal, duplicates):
@@ -2940,7 +2971,7 @@ class BudgetingApp:
         if not goals:
             tk.Label(
                 self.goals_cards_frame,
-                text="No goals yet. Add one to start tracking progress.",
+                text=self._t("goals_empty_cards"),
                 font=("Helvetica", 11),
                 fg="#555555"
             ).pack(pady=20)
@@ -4042,6 +4073,7 @@ class BudgetingApp:
     def _perform_logout(self):
         """Tear down current session and show login screen"""
         self.system.logout()
+        self._cancel_budget_alerts()
         self.root.destroy()
         
         # Return to login screen - import here to avoid circular import
@@ -4068,4 +4100,5 @@ class BudgetingApp:
     def _session_expired(self):
         """Handle session expiration"""
         messagebox.showwarning("Session Expired", "Your session has expired due to inactivity. Please login again.")
-        self.logout()
+        self._cancel_budget_alerts()
+        self._perform_logout()

@@ -930,6 +930,10 @@ class BudgetingSystem:
             if not category:
                 return False, "Invalid linked category"
         self.db.update_goal(goal_id, name, goal_type, target_amount, target_date, linked_category)
+        current_amount = goal[7] or 0
+        progress = (current_amount / target_amount) * 100 if target_amount else 0
+        status = 'completed' if progress >= 100 else 'active'
+        self.db.update_goal_progress(goal_id, current_amount, progress, status)
         return True, "Goal updated successfully"
     
     def get_goals(self):
