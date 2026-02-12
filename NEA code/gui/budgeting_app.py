@@ -1789,6 +1789,8 @@ class BudgetingApp:
         ).grid(row=2, column=0, sticky="w", pady=4)
         self.report_end_entry = ttk.Entry(options_body, width=20)
         self.report_end_entry.grid(row=2, column=1, sticky="ew", pady=4, padx=6)
+        self.report_type_combo.bind("<<ComboboxSelected>>", self._sync_report_dates)
+        self._sync_report_dates()
 
         button_frame = ttk.Frame(options_card)
         button_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
@@ -1814,6 +1816,103 @@ class BudgetingApp:
             sticky="ew"
         )
 
+        ttk.Separator(options_card, orient="horizontal").grid(
+            row=3, column=0, sticky="ew", padx=12, pady=(6, 8)
+        )
+
+        compare_title = tk.Label(
+            options_card,
+            text=self._t("compare_periods_title"),
+            bg=surface_bg,
+            fg=text_primary,
+            font=("Helvetica Neue", 12, "bold")
+        )
+        compare_title.grid(row=4, column=0, sticky="w", padx=12, pady=(0, 2))
+
+        compare_body = tk.Frame(options_card, bg=surface_bg)
+        compare_body.grid(row=5, column=0, sticky="ew", padx=12, pady=(4, 8))
+        compare_body.columnconfigure(1, weight=1)
+
+        tk.Label(
+            compare_body,
+            text=self._t("compare_metric_label"),
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=0, column=0, sticky="w", pady=4)
+        self.compare_metric_combo = ttk.Combobox(
+            compare_body,
+            values=["spending", "income"],
+            width=23,
+            state="readonly"
+        )
+        self.compare_metric_combo.grid(row=0, column=1, sticky="ew", pady=4, padx=6)
+        self.compare_metric_combo.set("spending")
+
+        tk.Label(
+            compare_body,
+            text=self._t("compare_category_label"),
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=1, column=0, sticky="w", pady=4)
+        self.compare_category_combo = ttk.Combobox(
+            compare_body,
+            values=["All"],
+            width=23,
+            state="readonly"
+        )
+        self.compare_category_combo.grid(row=1, column=1, sticky="ew", pady=4, padx=6)
+        self.compare_category_combo.set("All")
+
+        tk.Label(
+            compare_body,
+            text=self._t("compare_period_label"),
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=2, column=0, sticky="w", pady=4)
+        self.compare_period_combo = ttk.Combobox(
+            compare_body,
+            values=["weekly", "monthly", "yearly", "custom"],
+            width=23,
+            state="readonly"
+        )
+        self.compare_period_combo.grid(row=2, column=1, sticky="ew", pady=4, padx=6)
+        self.compare_period_combo.set("monthly")
+
+        tk.Label(
+            compare_body,
+            text=self._t("from_label"),
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=3, column=0, sticky="w", pady=4)
+        self.compare_from_entry = ttk.Entry(compare_body, width=20)
+        self.compare_from_entry.grid(row=3, column=1, sticky="ew", pady=4, padx=6)
+
+        tk.Label(
+            compare_body,
+            text=self._t("to_label"),
+            bg=surface_bg,
+            fg=text_muted
+        ).grid(row=4, column=0, sticky="w", pady=4)
+        self.compare_to_entry = ttk.Entry(compare_body, width=20)
+        self.compare_to_entry.grid(row=4, column=1, sticky="ew", pady=4, padx=6)
+
+        self.compare_by_category_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            compare_body,
+            text=self._t("compare_by_category"),
+            variable=self.compare_by_category_var
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        ttk.Button(options_card, text=self._t("compare_run_button"), command=self.run_comparison).grid(
+            row=6,
+            column=0,
+            sticky="ew",
+            padx=12,
+            pady=(0, 12)
+        )
+        self.compare_period_combo.bind("<<ComboboxSelected>>", self._sync_compare_dates)
+        self._sync_compare_dates()
+
         report_card = tk.Frame(
             content,
             bg=surface_bg,
@@ -1836,10 +1935,22 @@ class BudgetingApp:
         self.report_display = tk.Frame(report_card, bg=surface_bg)
         self.report_display.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
         self.report_display.columnconfigure(0, weight=1)
-        self.report_display.rowconfigure(0, weight=1)
+        self.report_display.rowconfigure(0, weight=0)
+        self.report_display.rowconfigure(1, weight=1)
+
+        self.compare_fig, self.compare_ax = plt.subplots(figsize=(5.8, 2.2))
+        self.compare_fig.patch.set_facecolor(surface_bg)
+        self.compare_ax.set_facecolor("white")
+        self.compare_canvas = FigureCanvasTkAgg(self.compare_fig, master=self.report_display)
+        compare_widget = self.compare_canvas.get_tk_widget()
+        compare_widget.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        compare_widget.configure(bg=surface_bg, highlightthickness=0)
 
         self.report_text = tk.Text(self.report_display, height=20, width=80)
-        self.report_text.grid(row=0, column=0, sticky="nsew")
+        self.report_text.grid(row=1, column=0, sticky="nsew")
+        self.report_text.tag_configure("good", foreground="#2e8b57")
+        self.report_text.tag_configure("bad", foreground="#c0392b")
+        self.report_text.tag_configure("neutral", foreground=text_muted)
 
     def _format_currency(self, amount):
         """Format a currency value for display."""
@@ -3059,6 +3170,7 @@ class BudgetingApp:
             self.goals_tree.delete(child)
         
         goals = self.system.get_goals()
+        self._maybe_show_goal_alerts(goals)
         for goal in goals:
             progress_value = goal[8] or 0
             if goal[5] and progress_value <= 0 and goal[7]:
@@ -3069,6 +3181,45 @@ class BudgetingApp:
             ))
         self.refresh_goal_cards(goals)
         self._update_goal_selector(goals)
+
+    def _maybe_show_goal_alerts(self, goals):
+        """Show one-time goal milestone alerts."""
+        if not goals:
+            return
+        over_80 = []
+        completed = []
+        updates = []
+        for goal in goals:
+            display_progress, progress_value, current_amount, target_amount = self._get_goal_progress_info(goal)
+            if target_amount <= 0:
+                continue
+            alert_80_shown = goal[11] if len(goal) > 11 else 0
+            alert_complete_shown = goal[12] if len(goal) > 12 else 0
+            is_complete = progress_value >= 100 or (goal[9] or "") == "completed"
+            if is_complete:
+                if not alert_complete_shown:
+                    completed.append(goal[3])
+                    updates.append((goal[0], True, True))
+                elif not alert_80_shown:
+                    updates.append((goal[0], True, None))
+                continue
+            if progress_value >= 80 and not alert_80_shown:
+                over_80.append(goal[3])
+                updates.append((goal[0], True, None))
+
+        if completed:
+            message = "Congratulations! Goal completed:\n" + "\n".join(f"• {name}" for name in completed)
+            messagebox.showinfo("Goal Completed", message)
+        if over_80:
+            message = "Great work! You're over 80% on:\n" + "\n".join(f"• {name}" for name in over_80)
+            messagebox.showinfo("Goal Milestone", message)
+
+        for goal_id, alert_80, alert_complete in updates:
+            self.db.update_goal_alerts(
+                goal_id,
+                alert_80_shown=alert_80,
+                alert_complete_shown=alert_complete
+            )
     
     def refresh_comboboxes(self):
         """Refresh all combobox data"""
@@ -3082,6 +3233,11 @@ class BudgetingApp:
         self.filter_category_combo.set("All")
         
         self.budget_category_combo['values'] = category_names
+
+        if hasattr(self, "compare_category_combo"):
+            self.compare_category_combo['values'] = ["All"] + category_names
+            if self.compare_category_combo.get() not in self.compare_category_combo['values']:
+                self.compare_category_combo.set("All")
         
         self.parent_category_combo['values'] = ["None"] + category_names
         self.parent_category_combo.set("None")
@@ -3819,14 +3975,17 @@ class BudgetingApp:
     def generate_report(self):
         """Generate financial report"""
         report_type = self.report_type_combo.get()
-        start_date = self.report_start_entry.get()
-        end_date = self.report_end_entry.get()
-        
-        report_data = self.system.generate_report(
-            report_type,
-            start_date if report_type == 'custom' else None,
-            end_date if report_type == 'custom' else None
-        )
+        start_date = None
+        end_date = None
+        if report_type == "custom":
+            start_date, end_date = self._validate_custom_report_dates()
+            if not start_date:
+                return
+        try:
+            report_data = self.system.generate_report(report_type, start_date, end_date)
+        except ValueError as error:
+            messagebox.showerror("Error", str(error))
+            return
         
         if not report_data:
             messagebox.showerror("Error", "Failed to generate report")
@@ -3850,6 +4009,323 @@ class BudgetingApp:
         self.report_text.insert(tk.END, "\nRecent Transactions:\n")
         for t in report_data['transactions'][:10]:
             self.report_text.insert(tk.END, f"  {t[3]} | {t[4]} | £{t[5]:.2f} | {t[6]}\n")
+
+    def run_comparison(self):
+        """Compare current period with the previous period."""
+        period = (self.compare_period_combo.get() or "monthly").strip().lower()
+        metric = (self.compare_metric_combo.get() or "spending").strip().lower()
+        category = (self.compare_category_combo.get() or "All").strip()
+
+        if period not in ("weekly", "monthly", "yearly", "custom"):
+            messagebox.showerror("Error", "Invalid comparison period.")
+            return
+        if metric not in ("spending", "income"):
+            messagebox.showerror("Error", "Invalid comparison metric.")
+            return
+
+        today = datetime.date.today()
+        start_date = None
+        end_date = None
+        if period == "custom":
+            if not hasattr(self, "compare_from_entry") or not hasattr(self, "compare_to_entry"):
+                messagebox.showerror("Error", "Custom compare date range is not available.")
+                return
+            start_value = self.compare_from_entry.get().strip()
+            end_value = self.compare_to_entry.get().strip()
+            if not start_value or not end_value:
+                messagebox.showerror("Error", "Enter start and end dates for custom comparison.")
+                return
+            try:
+                start_date = datetime.datetime.strptime(start_value, "%Y-%m-%d").date()
+                end_date = datetime.datetime.strptime(end_value, "%Y-%m-%d").date()
+            except ValueError:
+                messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+                return
+            if end_date < start_date:
+                messagebox.showerror("Error", "End date cannot be before start date.")
+                return
+
+        current_start, current_end, previous_start, previous_end = self._get_compare_ranges(
+            period,
+            start_date,
+            end_date,
+            today
+        )
+
+        current_total, current_by_cat = self._get_period_totals(
+            current_start,
+            current_end,
+            metric,
+            None if category == "All" else category
+        )
+        previous_total, previous_by_cat = self._get_period_totals(
+            previous_start,
+            previous_end,
+            metric,
+            None if category == "All" else category
+        )
+
+        change = current_total - previous_total
+        percent_change, percent_label = self._format_percent_change(current_total, previous_total)
+        direction = "increase" if change > 0 else "decrease" if change < 0 else "no change"
+        arrow = "↑" if change > 0 else "↓" if change < 0 else "→"
+
+        good_when_increase = metric == "income"
+        if change == 0:
+            tag = "neutral"
+        elif (change > 0 and good_when_increase) or (change < 0 and not good_when_increase):
+            tag = "good"
+        else:
+            tag = "bad"
+
+        self.report_text.delete(1.0, tk.END)
+        self.report_text.insert(tk.END, "=== Compare vs Previous Period ===\n")
+        self.report_text.insert(
+            tk.END,
+            f"Period: {period.title()} ({current_start} to {current_end}) vs "
+            f"({previous_start} to {previous_end})\n"
+        )
+        self.report_text.insert(tk.END, f"Metric: {metric.title()}\n")
+        if category != "All":
+            self.report_text.insert(tk.END, f"Category: {category}\n")
+        self.report_text.insert(
+            tk.END,
+            f"Current total: {self._format_currency(current_total)}\n"
+        )
+        self.report_text.insert(
+            tk.END,
+            f"Previous total: {self._format_currency(previous_total)}\n"
+        )
+        change_line = f"Change: {arrow} {percent_label} ({direction})\n"
+        self.report_text.insert(tk.END, change_line, tag)
+
+        if self.compare_by_category_var.get() and category == "All":
+            self.report_text.insert(tk.END, "\nBy category (top changes):\n")
+            category_rows = self._build_category_changes(current_by_cat, previous_by_cat, metric)
+            if not category_rows:
+                self.report_text.insert(tk.END, "No category data for this period.\n", "neutral")
+            else:
+                for label, line, row_tag in category_rows:
+                    self.report_text.insert(tk.END, f"• {label}: {line}\n", row_tag)
+
+        self._render_compare_chart(
+            current_total,
+            previous_total,
+            metric,
+            category if category != "All" else None
+        )
+
+    def _validate_custom_report_dates(self):
+        """Validate custom report dates and return YYYY-MM-DD values."""
+        start_value = self.report_start_entry.get().strip()
+        end_value = self.report_end_entry.get().strip()
+        if not start_value and not end_value:
+            messagebox.showerror("Error", "Please enter start and end dates (YYYY-MM-DD).")
+            return None, None
+        if not start_value or not end_value:
+            messagebox.showerror("Error", "Please enter both start and end dates (YYYY-MM-DD).")
+            return None, None
+        try:
+            start_date = datetime.datetime.strptime(start_value, "%Y-%m-%d").date()
+            end_date = datetime.datetime.strptime(end_value, "%Y-%m-%d").date()
+        except ValueError:
+            messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+            return None, None
+        if end_date < start_date:
+            messagebox.showerror("Error", "End date cannot be before start date.")
+            return None, None
+        return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
+
+    def _sync_report_dates(self, *_):
+        """Auto-fill report dates when a standard period is selected."""
+        if not hasattr(self, "report_start_entry") or not hasattr(self, "report_end_entry"):
+            return
+        period = (self.report_type_combo.get() or "monthly").strip().lower()
+        if period not in ("weekly", "monthly", "yearly", "custom"):
+            return
+        if period == "custom":
+            self.report_start_entry.config(state="normal")
+            self.report_end_entry.config(state="normal")
+            return
+        self.report_start_entry.config(state="normal")
+        self.report_end_entry.config(state="normal")
+        today = datetime.date.today()
+        current_start, current_end, _, _ = self._get_compare_ranges(period, None, None, today)
+        self.report_start_entry.delete(0, tk.END)
+        self.report_start_entry.insert(0, current_start.strftime("%Y-%m-%d"))
+        self.report_end_entry.delete(0, tk.END)
+        self.report_end_entry.insert(0, current_end.strftime("%Y-%m-%d"))
+        self.report_start_entry.config(state="disabled")
+        self.report_end_entry.config(state="disabled")
+
+    def _sync_compare_dates(self, *_):
+        """Auto-fill compare dates when a standard period is selected."""
+        if not hasattr(self, "compare_from_entry") or not hasattr(self, "compare_to_entry"):
+            return
+        period = (self.compare_period_combo.get() or "monthly").strip().lower()
+        if period not in ("weekly", "monthly", "yearly", "custom"):
+            return
+        if period == "custom":
+            self.compare_from_entry.config(state="normal")
+            self.compare_to_entry.config(state="normal")
+            return
+        self.compare_from_entry.config(state="normal")
+        self.compare_to_entry.config(state="normal")
+        today = datetime.date.today()
+        current_start, current_end, _, _ = self._get_compare_ranges(period, None, None, today)
+        self.compare_from_entry.delete(0, tk.END)
+        self.compare_from_entry.insert(0, current_start.strftime("%Y-%m-%d"))
+        self.compare_to_entry.delete(0, tk.END)
+        self.compare_to_entry.insert(0, current_end.strftime("%Y-%m-%d"))
+        self.compare_from_entry.config(state="disabled")
+        self.compare_to_entry.config(state="disabled")
+
+    def _get_compare_ranges(self, period, start_date, end_date, today):
+        """Return current and previous period ranges."""
+        if period == "monthly":
+            current_start = today.replace(day=1)
+            if today.month == 12:
+                current_end = today.replace(year=today.year + 1, month=1, day=1) - datetime.timedelta(days=1)
+            else:
+                current_end = today.replace(month=today.month + 1, day=1) - datetime.timedelta(days=1)
+            previous_end = current_start - datetime.timedelta(days=1)
+            previous_start = previous_end.replace(day=1)
+        elif period == "weekly":
+            current_start = today - datetime.timedelta(days=today.weekday())
+            current_end = current_start + datetime.timedelta(days=6)
+            previous_end = current_start - datetime.timedelta(days=1)
+            previous_start = previous_end - datetime.timedelta(days=6)
+        elif period == "yearly":
+            current_start = datetime.date(today.year, 1, 1)
+            current_end = datetime.date(today.year, 12, 31)
+            previous_start = datetime.date(today.year - 1, 1, 1)
+            previous_end = datetime.date(today.year - 1, 12, 31)
+        else:
+            current_start = start_date
+            current_end = end_date
+            length = (current_end - current_start).days
+            previous_end = current_start - datetime.timedelta(days=1)
+            previous_start = previous_end - datetime.timedelta(days=length)
+        return current_start, current_end, previous_start, previous_end
+
+    def _get_period_totals(self, start_date, end_date, metric, category_name):
+        """Return total and per-category totals for a period."""
+        transactions = self.system.get_transactions(
+            start_date.strftime("%Y-%m-%d"),
+            end_date.strftime("%Y-%m-%d")
+        )
+        total = 0.0
+        per_category = {}
+        for t in transactions:
+            if t[6] != ("income" if metric == "income" else "expense"):
+                continue
+            cat = self.get_category_name(t[2])
+            per_category[cat] = per_category.get(cat, 0) + (t[5] or 0)
+            if category_name and cat != category_name:
+                continue
+            total += t[5] or 0
+        return total, per_category
+
+    def _format_percent_change(self, current_total, previous_total):
+        """Return percent change and label."""
+        if previous_total == 0:
+            if current_total == 0:
+                return 0.0, "0%"
+            return None, "New"
+        change = (current_total - previous_total) / previous_total * 100
+        return change, f"{abs(change):.1f}%"
+
+    def _build_category_changes(self, current_by_cat, previous_by_cat, metric, limit=5):
+        """Build formatted category change rows."""
+        rows = []
+        good_when_increase = metric == "income"
+        categories = set(current_by_cat) | set(previous_by_cat)
+        for cat in categories:
+            current = current_by_cat.get(cat, 0.0)
+            previous = previous_by_cat.get(cat, 0.0)
+            change = current - previous
+            _, percent_label = self._format_percent_change(current, previous)
+            arrow = "↑" if change > 0 else "↓" if change < 0 else "→"
+            if change == 0:
+                tag = "neutral"
+            else:
+                tag = "good" if (change > 0 and good_when_increase) or (change < 0 and not good_when_increase) else "bad"
+            line = f"{arrow} {percent_label} ({self._format_currency(current)} vs {self._format_currency(previous)})"
+            rows.append((cat, line, tag, abs(change)))
+        rows.sort(key=lambda item: item[3], reverse=True)
+        return [(cat, line, tag) for cat, line, tag, _ in rows[:limit]]
+
+    def _render_compare_chart(self, current_total, previous_total, metric, category_name=None):
+        """Render a simple comparison line chart."""
+        if not hasattr(self, "compare_ax") or not hasattr(self, "compare_canvas"):
+            return
+        self.compare_ax.clear()
+        labels = ["Previous", "Current"]
+        values = [previous_total, current_total]
+        change = current_total - previous_total
+
+        accent = "#2e8b57" if metric == "income" else "#c0392b"
+        axis_color = "#f5f5f5"
+        x = [0, 1]
+
+        self.compare_ax.plot(
+            x,
+            values,
+            color=accent,
+            linewidth=2.5,
+            marker="o",
+            markersize=7,
+            markerfacecolor="white",
+            markeredgewidth=2,
+            markeredgecolor=accent
+        )
+        self.compare_ax.fill_between(x, values, color=accent, alpha=0.15)
+        self.compare_ax.set_xticks(x, labels)
+        title = f"{metric.title()} comparison"
+        if category_name:
+            title += f" • {category_name}"
+        self.compare_ax.set_title(title, fontsize=10, color=axis_color)
+        self.compare_ax.tick_params(axis="y", labelsize=8, colors=axis_color)
+        self.compare_ax.tick_params(axis="x", labelsize=9, colors=axis_color)
+        self.compare_ax.grid(axis="y", linestyle="--", alpha=0.25, color=axis_color)
+        for spine in ("top", "right"):
+            self.compare_ax.spines[spine].set_visible(False)
+        for spine in ("left", "bottom"):
+            self.compare_ax.spines[spine].set_color(axis_color)
+
+        ymin = min(values)
+        ymax = max(values)
+        padding = max(abs(ymax - ymin) * 0.2, 1)
+        self.compare_ax.set_ylim(ymin - padding, ymax + padding)
+
+        for xi, value in zip(x, values):
+            self.compare_ax.text(
+                xi,
+                value + (padding * 0.1),
+                f"{self._format_currency(value)}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color=axis_color
+            )
+
+        if change != 0:
+            trend_color = (
+                "#2e8b57"
+                if (change > 0 and metric == "income") or (change < 0 and metric == "spending")
+                else "#c0392b"
+            )
+            self.compare_ax.text(
+                0.5,
+                0.95,
+                ("↑" if change > 0 else "↓") + f" {abs(change):.2f}",
+                transform=self.compare_ax.transAxes,
+                ha="center",
+                va="top",
+                fontsize=9,
+                color=trend_color
+            )
+        self.compare_canvas.draw()
     
     def export_report(self, format_type):
         """Export report to file"""
@@ -3864,14 +4340,17 @@ class BudgetingApp:
         
         # Generate report data
         report_type = self.report_type_combo.get()
-        start_date = self.report_start_entry.get()
-        end_date = self.report_end_entry.get()
-        
-        report_data = self.system.generate_report(
-            report_type,
-            start_date if report_type == 'custom' else None,
-            end_date if report_type == 'custom' else None
-        )
+        start_date = None
+        end_date = None
+        if report_type == "custom":
+            start_date, end_date = self._validate_custom_report_dates()
+            if not start_date:
+                return
+        try:
+            report_data = self.system.generate_report(report_type, start_date, end_date)
+        except ValueError as error:
+            messagebox.showerror("Error", str(error))
+            return
         
         if not report_data:
             messagebox.showerror("Error", "No report data to export")

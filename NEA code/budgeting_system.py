@@ -5,11 +5,14 @@ Business logic for the Smart Budgeting System.
 import datetime
 import csv
 import math
+from io import BytesIO
 # ReportLab imports - package is required (listed in requirements.txt)
 from reportlab.lib import colors  # type: ignore
 from reportlab.lib.pagesizes import letter  # type: ignore
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer  # type: ignore
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image  # type: ignore
 from reportlab.lib.styles import getSampleStyleSheet  # type: ignore
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 from database import DatabaseManager
 from security import SecurityManager
@@ -978,9 +981,16 @@ class BudgetingSystem:
         elif period == 'yearly':
             start = today.replace(month=1, day=1)
             end = today.replace(month=12, day=31)
-        elif period == 'custom' and start_date and end_date:
-            start = datetime.datetime.strptime(start_date, "%Y-%m-%d").date()
-            end = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
+        elif period == 'custom':
+            if not start_date or not end_date:
+                raise ValueError("Please enter both start and end dates (YYYY-MM-DD).")
+            try:
+                start = datetime.datetime.strptime(start_date, "%Y-%m-%d").date()
+                end = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
+            except ValueError as error:
+                raise ValueError("Invalid date format. Use YYYY-MM-DD.") from error
+            if end < start:
+                raise ValueError("End date cannot be before start date.")
         else:
             return None
         
@@ -1060,6 +1070,89 @@ class BudgetingSystem:
                 ('GRID', (0, 0), (-1, -1), 1, colors.black)
             ]))
             elements.append(cat_table)
+
+        # Key insights
+        transactions = report_data.get('transactions', [])
+        income_tx = [t for t in transactions if t[6] == 'income']
+        expense_tx = [t for t in transactions if t[6] == 'expense']
+        avg_income = (sum(t[5] for t in income_tx) / len(income_tx)) if income_tx else 0
+        avg_expense = (sum(t[5] for t in expense_tx) / len(expense_tx)) if expense_tx else 0
+        largest_income = max(income_tx, key=lambda t: t[5]) if income_tx else None
+        largest_expense = max(expense_tx, key=lambda t: t[5]) if expense_tx else None
+        savings_rate = (
+            (report_data['savings'] / report_data['income']) * 100
+            if report_data['income'] > 0 else None
+        )
+
+        insights = [
+            ['Metric', 'Value'],
+            ['Transactions', f"{len(transactions)} total"],
+            ['Average income', f"£{avg_income:.2f}"],
+            ['Average expense', f"£{avg_expense:.2f}"],
+            ['Largest income', f"£{largest_income[5]:.2f} ({largest_income[4]})"] if largest_income else ['Largest income', 'N/A'],
+            ['Largest expense', f"£{largest_expense[5]:.2f} ({largest_expense[4]})"] if largest_expense else ['Largest expense', 'N/A'],
+            ['Savings rate', f"{savings_rate:.1f}%"] if savings_rate is not None else ['Savings rate', 'N/A']
+        ]
+        elements.append(Spacer(1, 12))
+        elements.append(Paragraph("Key Insights:", styles['Heading2']))
+        insights_table = Table(insights, colWidths=[doc.width * 0.35, doc.width * 0.65])
+        insights_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.whitesmoke),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey)
+        ]))
+        elements.append(insights_table)
+
+        # Charts
+        def build_chart_image(fig, height_ratio=0.45):
+            img_buffer = BytesIO()
+            canvas = FigureCanvas(fig)
+            canvas.print_png(img_buffer)
+            img_buffer.seek(0)
+            return Image(img_buffer, width=doc.width, height=doc.width * height_ratio)
+
+        elements.append(Spacer(1, 12))
+        elements.append(Paragraph("Charts:", styles['Heading2']))
+
+        # Income vs expenses chart
+        summary_fig = Figure(figsize=(6, 3))
+        summary_ax = summary_fig.add_subplot(111)
+        summary_ax.bar(
+            ["Income", "Expenses"],
+            [report_data['income'], report_data['expenses']],
+            color=["#2e8b57", "#c0392b"]
+        )
+        summary_ax.set_ylabel("Amount (£)")
+        summary_ax.set_title("Income vs Expenses")
+        summary_ax.grid(axis="y", linestyle="--", alpha=0.3)
+        for spine in ("top", "right"):
+            summary_ax.spines[spine].set_visible(False)
+        elements.append(build_chart_image(summary_fig))
+
+        # Category breakdown chart (top 6)
+        if report_data['category_breakdown']:
+            top_categories = sorted(
+                report_data['category_breakdown'].items(),
+                key=lambda item: item[1],
+                reverse=True
+            )[:6]
+            cat_fig = Figure(figsize=(6, 3))
+            cat_ax = cat_fig.add_subplot(111)
+            labels = [name for name, _ in top_categories]
+            values = [value for _, value in top_categories]
+            cat_ax.barh(labels, values, color="#4f6cff")
+            cat_ax.invert_yaxis()
+            cat_ax.set_xlabel("Amount (£)")
+            cat_ax.set_title("Top Categories")
+            cat_ax.grid(axis="x", linestyle="--", alpha=0.3)
+            for spine in ("top", "right"):
+                cat_ax.spines[spine].set_visible(False)
+            elements.append(Spacer(1, 8))
+            elements.append(build_chart_image(cat_fig))
         
         doc.build(elements)
         return True

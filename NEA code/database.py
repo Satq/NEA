@@ -120,10 +120,13 @@ class DatabaseManager:
                 progress REAL DEFAULT 0,
                 status TEXT DEFAULT 'active',
                 rank INTEGER,
+                alert_80_shown INTEGER DEFAULT 0,
+                alert_complete_shown INTEGER DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
                 FOREIGN KEY (linked_category) REFERENCES categories(category_id)
             )
         """)
+        self._ensure_goal_alert_columns(cursor)
 
         # Default rules table maps keywords to categories for auto-tagging per user.
         cursor.execute("""
@@ -202,6 +205,15 @@ class DatabaseManager:
         columns = [row[1] for row in cursor.fetchall()]
         if "user_id" not in columns:
             cursor.execute("ALTER TABLE categories ADD COLUMN user_id INTEGER")
+
+    def _ensure_goal_alert_columns(self, cursor):
+        """Add alert flags to goals for legacy databases if missing."""
+        cursor.execute("PRAGMA table_info(goals)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "alert_80_shown" not in columns:
+            cursor.execute("ALTER TABLE goals ADD COLUMN alert_80_shown INTEGER DEFAULT 0")
+        if "alert_complete_shown" not in columns:
+            cursor.execute("ALTER TABLE goals ADD COLUMN alert_complete_shown INTEGER DEFAULT 0")
 
     def _ensure_default_rules_user_column(self, cursor):
         """Add user_id column to default rules for legacy databases if missing."""
@@ -668,6 +680,22 @@ class DatabaseManager:
         """Change the order rank for a goal."""
         query = "UPDATE goals SET rank = ? WHERE goal_id = ?"
         self.execute_query(query, (rank, goal_id))
+
+    def update_goal_alerts(self, goal_id, alert_80_shown=None, alert_complete_shown=None):
+        """Update goal alert flags."""
+        fields = []
+        params = []
+        if alert_80_shown is not None:
+            fields.append("alert_80_shown = ?")
+            params.append(1 if alert_80_shown else 0)
+        if alert_complete_shown is not None:
+            fields.append("alert_complete_shown = ?")
+            params.append(1 if alert_complete_shown else 0)
+        if not fields:
+            return
+        params.append(goal_id)
+        query = f"UPDATE goals SET {', '.join(fields)} WHERE goal_id = ?"
+        self.execute_query(query, params)
 
     def delete_goal(self, goal_id):
         """Remove a goal row."""
