@@ -1,49 +1,59 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Setup script for Smart Budgeting System
-# This script creates a virtual environment and installs all required dependencies
 
 set -euo pipefail
 
 echo "Setting up Smart Budgeting System..."
 
-# Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
-# Check if Python 3.14 is available (required for tkinter support)
-if ! command -v python3.14 &> /dev/null; then
-    echo "Python 3.14 not found."
-    echo "Installing python-tk via Homebrew..."
-    if ! command -v brew &> /dev/null; then
-        echo "Homebrew not found. Please install Homebrew first: https://brew.sh"
-        exit 1
-    fi
-    brew install python-tk
+PYTHON_CMD=""
+if command -v python3.14 >/dev/null 2>&1; then
+    PYTHON_CMD="python3.14"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_CMD="python3"
+else
+    echo "Python 3 was not found. Please install Python 3.10+ and rerun setup."
+    exit 1
 fi
 
-# Remove old virtual environment if it exists
-if [ -d "venv" ]; then
-    echo "Removing existing virtual environment..."
-    rm -rf venv
+if ! "$PYTHON_CMD" - <<'PY'
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit(1)
+PY
+then
+    echo "Python 3.10+ is required."
+    exit 1
 fi
 
-# Create virtual environment with Python 3.14
-echo "Creating virtual environment with Python 3.14..."
-python3.14 -m venv venv
+if ! "$PYTHON_CMD" - <<'PY'
+import tkinter
+PY
+then
+    echo "tkinter is not available in $PYTHON_CMD."
+    echo "Install a Python build with Tk support, then rerun setup."
+    echo "On macOS with Homebrew this is usually provided by the python-tk package."
+    exit 1
+fi
 
-# Activate virtual environment
+if [ ! -d "venv" ]; then
+    echo "Creating virtual environment with $PYTHON_CMD..."
+    "$PYTHON_CMD" -m venv venv
+else
+    echo "Using existing virtual environment (venv)."
+fi
+
 echo "Activating virtual environment..."
 source venv/bin/activate
 
-# Upgrade pip
 echo "Upgrading pip..."
 python -m pip install --upgrade pip
 
-# Install required packages
 echo "Installing required packages..."
 python -m pip install -r requirements.txt
 
-# Verify installation
 echo "Verifying installation..."
 if python - <<'PY'
 import tkinter
@@ -54,11 +64,11 @@ print("All modules installed successfully.")
 PY
 then
     echo
-    echo "Setup complete! You can now run the application with:"
-    echo "   ./run.sh"
-    echo "   or"
-    echo "   source venv/bin/activate && python 'NEA code/budgeting_system.py'"
+    echo "Setup complete. Run the app with:"
+    echo "  ./run.sh"
+    echo "or"
+    echo "  source venv/bin/activate && python 'NEA code/main.py'"
 else
-    echo "Setup failed. Please check the error messages above."
+    echo "Setup failed. Please check the errors above."
     exit 1
 fi

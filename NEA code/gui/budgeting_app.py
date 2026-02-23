@@ -1900,7 +1900,8 @@ class BudgetingApp:
         ttk.Checkbutton(
             compare_body,
             text=self._t("compare_by_category"),
-            variable=self.compare_by_category_var
+            variable=self.compare_by_category_var,
+            command=self._toggle_compare_category_filter
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         ttk.Button(options_card, text=self._t("compare_run_button"), command=self.run_comparison).grid(
@@ -1912,6 +1913,7 @@ class BudgetingApp:
         )
         self.compare_period_combo.bind("<<ComboboxSelected>>", self._sync_compare_dates)
         self._sync_compare_dates()
+        self._toggle_compare_category_filter()
 
         report_card = tk.Frame(
             content,
@@ -3238,6 +3240,7 @@ class BudgetingApp:
             self.compare_category_combo['values'] = ["All"] + category_names
             if self.compare_category_combo.get() not in self.compare_category_combo['values']:
                 self.compare_category_combo.set("All")
+            self._toggle_compare_category_filter()
         
         self.parent_category_combo['values'] = ["None"] + category_names
         self.parent_category_combo.set("None")
@@ -4015,6 +4018,8 @@ class BudgetingApp:
         period = (self.compare_period_combo.get() or "monthly").strip().lower()
         metric = (self.compare_metric_combo.get() or "spending").strip().lower()
         category = (self.compare_category_combo.get() or "All").strip()
+        if not self.compare_by_category_var.get():
+            category = "All"
 
         if period not in ("weekly", "monthly", "yearly", "custom"):
             messagebox.showerror("Error", "Invalid comparison period.")
@@ -4135,6 +4140,16 @@ class BudgetingApp:
             messagebox.showerror("Error", "End date cannot be before start date.")
             return None, None
         return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
+
+    def _toggle_compare_category_filter(self):
+        """Disable category selection unless compare-by-category is enabled."""
+        if not hasattr(self, "compare_category_combo") or not hasattr(self, "compare_by_category_var"):
+            return
+        if self.compare_by_category_var.get():
+            self.compare_category_combo.config(state="readonly")
+            return
+        self.compare_category_combo.set("All")
+        self.compare_category_combo.config(state="disabled")
 
     def _sync_report_dates(self, *_):
         """Auto-fill report dates when a standard period is selected."""
