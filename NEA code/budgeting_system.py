@@ -36,6 +36,7 @@ class BudgetingSystem:
         # Login security settings.
         self.password_attempt_limit = 5
         self.password_lock_minutes = 10
+        self.session_timeout_seconds = 900
         self.category_name_max_length = 40
         self.rule_keyword_max_length = 60
     
@@ -119,7 +120,11 @@ class BudgetingSystem:
         # Save login info and create a new session token.
         self.current_user_id = user[0]
         self.session_token = self.security.generate_session_token()
-        self.db.create_session(self.current_user_id, self.session_token)
+        self.db.create_session(
+            self.current_user_id,
+            self.session_token,
+            timeout=self.session_timeout_seconds
+        )
         
         return True, "Login successful"
     
@@ -295,10 +300,6 @@ class BudgetingSystem:
             return False, "Not logged in"
         self.db.delete_default_rule(rule_id, self.current_user_id)
         return True, "Rule deleted successfully"
-
-    def resolve_default_category(self, description, category_id):
-        """Resolve category based on default rules for a description."""
-        return self._apply_default_rules(description, category_id)
 
     def get_csv_import_schema(self):
         """Return CSV fields and header aliases for import mapping."""
@@ -545,7 +546,7 @@ class BudgetingSystem:
             if parent[4] is not None and parent[4] != self.current_user_id:
                 return False, "Selected parent does not exist"
         
-        category_id = self.db.create_category(name, category_type, parent_id, self.current_user_id)
+        self.db.create_category(name, category_type, parent_id, self.current_user_id)
         return True, f"Category '{name}' created successfully"
     
     def update_category(self, category_id, name, category_type, parent_id=None):
@@ -658,7 +659,7 @@ class BudgetingSystem:
             category_id = self._apply_default_rules(description, category_id)
         
         # Save transaction
-        trans_id = self.db.create_transaction(
+        self.db.create_transaction(
             self.current_user_id, category_id, date,
             description, amount, trans_type, tag, goal_id
         )
@@ -666,9 +667,6 @@ class BudgetingSystem:
         # Update goal progress only when explicitly linked
         if goal_id:
             self._apply_goal_contribution(goal_id, amount)
-        
-        # Check budget alerts
-        self._check_budget_alerts(category_id)
         
         return True, "Transaction added successfully"
 
@@ -722,44 +720,6 @@ class BudgetingSystem:
         progress = (current / target) * 100 if target else 0
         status = 'completed' if progress >= 100 else 'active'
         self.db.update_goal_progress(goal_id, current, progress, status)
-        self._trigger_goal_milestones(goal_id, progress)
-    
-    def _trigger_goal_milestones(self, goal_id, progress):
-        """Trigger notifications at 25%, 50%, 75%, 100%"""
-        milestones = [25, 50, 75, 100]
-        for milestone in milestones:
-            if progress >= milestone:
-                # In a real app, this would show a notification
-                print(f"Goal milestone reached: {milestone}%")
-    
-    def _check_budget_alerts(self, category_id):
-        """Check if budget thresholds are exceeded"""
-        budgets = self.db.get_budgets(self.current_user_id, category_id)
-        
-        for budget in budgets:
-            limit_amount = budget[3]
-            start_date = budget[4]
-            end_date = budget[5]
-            
-            # Get total spending in budget period
-            query = """
-                SELECT SUM(amount) FROM transactions
-                WHERE user_id = ? AND category_id = ?
-                AND date BETWEEN ? AND ?
-                AND type = 'expense'
-            """
-            total_spent = self.db.execute_query(
-                query,
-                (self.current_user_id, category_id, start_date, end_date),
-                fetch_one=True
-            )[0] or 0
-            
-            percentage = (total_spent / limit_amount) * 100 if limit_amount > 0 else 0
-            
-            for threshold in self.alert_thresholds:
-                if percentage >= threshold:
-                    # In a real app, this would show a notification
-                    print(f"Budget alert: {threshold}% exceeded for category {category_id}")
     
     def get_transactions(self, start_date=None, end_date=None, category_id=None):
         """Get transactions for current user"""
@@ -810,7 +770,7 @@ class BudgetingSystem:
         if count > 0:
             return False, "Budget already exists for this category in the selected period"
         
-        budget_id = self.db.create_budget(
+        self.db.create_budget(
             self.current_user_id, category_id, limit_amount,
             start_date, end_date
         )
@@ -904,7 +864,7 @@ class BudgetingSystem:
         except:
             return False, "Invalid date format. Use YYYY-MM-DD"
         
-        goal_id = self.db.create_goal(
+        self.db.create_goal(
             self.current_user_id, name, goal_type,
             target_amount, target_date, linked_category, rank
         )
@@ -1236,18 +1196,27 @@ class BudgetingSystem:
         if not self.current_user_id or not self.session_token:
             return False
         
-        session = self.db.get_session(self.current_user_id)
+        session = self.db.get_session(self.current_user_id, self.session_token)
         if not session:
             return False
         
         # Check timeout
-        last_activity = datetime.datetime.strptime(session[3], "%Y-%m-%d %H:%M:%S")
-        timeout = session[4]
+        try:
+            last_activity = datetime.datetime.strptime(
+                session[3], "%Y-%m-%d %H:%M:%S"
+            ).replace(tzinfo=datetime.timezone.utc)
+        except (TypeError, ValueError):
+            self.logout()
+            return False
+        timeout = int(session[4]) if session[4] is not None else self.session_timeout_seconds
         
-        if (datetime.datetime.now() - last_activity).seconds > timeout:
+        elapsed_seconds = (
+            datetime.datetime.now(datetime.timezone.utc) - last_activity
+        ).total_seconds()
+        if elapsed_seconds > timeout:
             self.logout()
             return False
         
         # Update activity
-        self.db.update_session_activity(self.current_user_id)
+        self.db.update_session_activity(self.current_user_id, self.session_token)
         return True

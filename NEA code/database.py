@@ -3,6 +3,7 @@ Database layer for the Smart Budgeting System.
 Keeps the same behaviour but explained with clear, student-friendly comments.
 """
 
+import datetime
 import sqlite3
 
 DEFAULT_CATEGORIES = [
@@ -21,6 +22,8 @@ DEFAULT_CATEGORIES = [
 
 class DatabaseManager:
     """Handles all SQLite reads/writes for users, budgets, and sessions."""
+
+    DEFAULT_SESSION_TIMEOUT = 900
 
     def __init__(self, db_name="smart_budgeting_system.db"):
         self.db_name = db_name
@@ -549,11 +552,6 @@ class DatabaseManager:
         query = "DELETE FROM categories WHERE category_id = ?"
         self.execute_query(query, (category_id,))
 
-    def get_subcategories(self, parent_id):
-        """List all categories that have the given parent id."""
-        query = "SELECT * FROM categories WHERE parent_category_id = ?"
-        return self.execute_query(query, (parent_id,), fetch_all=True)
-
     # -----------------------
     # Transaction methods
     # -----------------------
@@ -765,20 +763,55 @@ class DatabaseManager:
     # -----------------------
     # Session management
     # -----------------------
-    def create_session(self, user_id, token):
-        """Store a new session token."""
-        query = "INSERT INTO sessions (user_id, token) VALUES (?, ?)"
-        return self.execute_query(query, (user_id, token))
+    def create_session(self, user_id, token, timeout=None):
+        """Store one active session token per user."""
+        timeout_value = (
+            int(timeout) if timeout is not None else self.DEFAULT_SESSION_TIMEOUT
+        )
+        last_activity = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        # Remove stale sessions first so token-based lookups stay deterministic.
+        self.execute_query("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        query = """
+            INSERT INTO sessions (user_id, token, last_activity, timeout)
+            VALUES (?, ?, ?, ?)
+        """
+        return self.execute_query(query, (user_id, token, last_activity, timeout_value))
 
-    def get_session(self, user_id):
-        """Get the most recent session for a user."""
-        query = "SELECT * FROM sessions WHERE user_id = ? ORDER BY last_activity DESC LIMIT 1"
+    def get_session(self, user_id, token=None):
+        """Get the active session for a user, optionally matching the current token."""
+        if token:
+            query = """
+                SELECT * FROM sessions
+                WHERE user_id = ? AND token = ?
+                ORDER BY session_id DESC
+                LIMIT 1
+            """
+            return self.execute_query(query, (user_id, token), fetch_one=True)
+        query = "SELECT * FROM sessions WHERE user_id = ? ORDER BY session_id DESC LIMIT 1"
         return self.execute_query(query, (user_id,), fetch_one=True)
 
-    def update_session_activity(self, user_id):
-        """Update last activity time for a session."""
-        query = "UPDATE sessions SET last_activity = CURRENT_TIMESTAMP WHERE user_id = ?"
-        self.execute_query(query, (user_id,))
+    def update_session_activity(self, user_id, token=None):
+        """Update last activity time for the active session."""
+        last_activity = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        if token:
+            query = """
+                UPDATE sessions
+                SET last_activity = ?
+                WHERE user_id = ? AND token = ?
+            """
+            self.execute_query(query, (last_activity, user_id, token))
+            return
+        query = """
+            UPDATE sessions
+            SET last_activity = ?
+            WHERE session_id = (
+                SELECT session_id FROM sessions
+                WHERE user_id = ?
+                ORDER BY session_id DESC
+                LIMIT 1
+            )
+        """
+        self.execute_query(query, (last_activity, user_id))
 
     def delete_session(self, user_id):
         """Remove a session row."""

@@ -13,7 +13,80 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.patches import Circle
 
-from gui.translations import DEFAULT_LANGUAGE, LANGUAGE_MAP, translate_text
+UI_TEXT = {
+    "smart_budget_system": "Smart Budget System",
+    "quick_menu": "Quick Menu",
+    "dashboard_tab": "Dashboard",
+    "transactions_tab": "Transactions",
+    "categories_tab": "Categories",
+    "budgets_tab": "Budgets",
+    "goals_tab": "Goals",
+    "reports_tab": "Reports",
+    "overall_budget": "Current Overall Budget",
+    "total_spending": "Total Spending",
+    "total_income": "Total Income",
+    "current_goal": "Current Goal",
+    "goal_ring_empty": "Add a goal to track progress",
+    "recent_transactions": "Recent Transactions",
+    "quick_actions": "Quick Actions",
+    "add_transaction": "Add New Transaction",
+    "delete_transaction": "Delete Transaction",
+    "edit_transaction": "Edit Transaction",
+    "view_transactions": "View All Transactions",
+    "goal_viewing": "Viewing:",
+    "category_filter_label": "Category:",
+    "compare_periods_title": "Compare Periods",
+    "compare_metric_label": "Metric:",
+    "compare_category_label": "Category:",
+    "compare_period_label": "Period:",
+    "compare_by_category": "Compare by category",
+    "compare_run_button": "Run Comparison",
+    "from_label": "From",
+    "to_label": "To",
+    "apply_button": "Apply",
+    "clear_button": "Clear",
+    "categories_spending_by": "Spending by Category",
+    "categories_income_by": "Income by Category",
+    "categories_add_title": "Add Category",
+    "categories_name_label": "Name:",
+    "categories_type_label": "Type:",
+    "categories_parent_label": "Parent Category (optional):",
+    "categories_list_title": "Categories",
+    "categories_edit_action": "Edit Category",
+    "categories_delete_action": "Delete Category",
+    "categories_view_spending": "View Spending",
+    "categories_view_income": "View Income",
+    "budget_mute_alerts": "Mute alerts (session)",
+    "overall_budget_card": "Overall Budget",
+    "budget_add_title": "Add Budget",
+    "budget_category_label": "Category:",
+    "budget_limit_label": "Limit Amount:",
+    "budget_start_label": "Start Date:",
+    "budget_end_label": "End Date:",
+    "budget_list_title": "Active Budgets",
+    "budget_edit_action": "Edit Budget",
+    "budget_delete_action": "Delete Budget",
+    "goals_overview": "Goals Overview",
+    "goals_add_title": "Add Goal",
+    "goals_name_label": "Name:",
+    "goals_type_label": "Type:",
+    "goals_target_amount": "Target Amount:",
+    "goals_target_date": "Target Date:",
+    "goals_list_title": "Goals List",
+    "goals_edit_action": "Edit Goal",
+    "goals_delete_action": "Delete Goal",
+    "goals_empty_cards": "No goals yet. Add one to start tracking progress.",
+    "budget_donut_empty": "Add budgets to\nbuild your donut",
+    "budget_total_zero": "Budgets total\n£0.00",
+    "spending_breakdown": "Spending Breakdown",
+    "income_sources": "Income Sources",
+    "no_expense_data": "No expense data yet",
+    "no_income_data": "No income data yet",
+    "no_recent_activity": "No recent activity",
+    "period_all_time": "Period: All time",
+    "period_range": "Period: {start} - {end}",
+    "logout": "Log Out",
+}
 
 
 class BudgetingApp:
@@ -35,15 +108,8 @@ class BudgetingApp:
                     f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}"
                 )
         self.root.protocol("WM_DELETE_WINDOW", self._confirm_application_exit)
-        prefs = self.system.get_preferences()
-        self.current_language = (
-            prefs[5] if prefs and len(prefs) > 5 and prefs[5] in LANGUAGE_MAP else DEFAULT_LANGUAGE
-        )
         self.side_menu_visible = False
         self.side_menu_width = 240
-        self.locked = False
-        self.lock_overlay = None
-        self.language_window = None
         self.account_window = None
         self.goal_ring_has_goal = False
         self.nav_style_initialized = False
@@ -85,15 +151,13 @@ class BudgetingApp:
         self.db = system.db
         
         # Session monitoring (auto lock after timeout).
-        self.last_activity = time.time()
-        self.session_timeout = 900  # 15 minutes
         self._monitor_session()
         
         # Build all UI pieces.
         self._create_hamburger_menu()
         self.create_menu()
         self.create_main_interface()
-        self.apply_language_to_ui(self.current_language)
+        self.apply_language_to_ui()
         self.root.bind("<Configure>", self._lift_overlay_elements)
         
         # Load data once the UI is ready.
@@ -138,6 +202,7 @@ class BudgetingApp:
             "Are you sure you want to quit?"
         )
         if answer:
+            self.system.logout()
             self._cancel_budget_alerts()
             self.root.destroy()
     
@@ -203,17 +268,15 @@ class BudgetingApp:
         
         self.side_menu_buttons = {}
         options = [
-            ("settings", self.open_settings_window),
-            ("themes", self.open_theme_window),
-            ("manage_account", self.open_account_manager),
-            ("language", self.open_language_window),
-            ("accessibility", self.open_accessibility_center),
+            ("Preferences", self.manage_preferences),
+            ("Manage Account", self.open_account_manager),
+            ("About", self.show_about),
         ]
         
-        for key, cmd in options:
+        for label, cmd in options:
             btn = tk.Button(
                 self.side_menu,
-                text=self._t(key),
+                text=label,
                 command=cmd,
                 anchor="w",
                 padx=20,
@@ -226,7 +289,7 @@ class BudgetingApp:
                 cursor="hand2"
             )
             btn.pack(fill="x", padx=10, pady=4)
-            self.side_menu_buttons[key] = btn
+            self.side_menu_buttons[label] = btn
         
         tk.Frame(self.side_menu, bg="#d0d0d0", height=2).pack(fill="x", padx=10, pady=15)
         
@@ -248,22 +311,6 @@ class BudgetingApp:
             cursor="hand2"
         )
         self.logout_btn.pack(fill="x", pady=4)
-        
-        self.lock_btn = tk.Button(
-            quick_actions,
-            text=self._t("lock"),
-            command=self.quick_lock,
-            anchor="w",
-            padx=20,
-            pady=8,
-            relief="flat",
-            bg="white",
-            fg="#111111",
-            activebackground="#e0e0e0",
-            activeforeground="#000000",
-            cursor="hand2"
-        )
-        self.lock_btn.pack(fill="x", pady=4)
     
     def toggle_side_menu(self):
         """Show or hide the side menu"""
@@ -298,8 +345,6 @@ class BudgetingApp:
             self.hamburger_container.lift()
         if self.side_menu_visible:
             self.side_menu.lift()
-        if self.lock_overlay:
-            self.lock_overlay.lift()
     
     def _show_tree_context_menu(self, event, tree, menu):
         """Utility to show context menus on right-click for treeviews"""
@@ -320,29 +365,19 @@ class BudgetingApp:
         return True
     
     def _t(self, key):
-        """Convenience translator"""
-        return translate_text(self.current_language, key)
+        """Return static UI text for a key."""
+        return UI_TEXT.get(key, key)
     
-    def apply_language_to_ui(self, language=None):
-        """Update visible text across the interface"""
-        if language:
-            if language in LANGUAGE_MAP:
-                self.current_language = language
-            else:
-                self.current_language = DEFAULT_LANGUAGE
+    def apply_language_to_ui(self):
+        """Update visible text across the interface."""
         self.root.title(self._t("smart_budget_system"))
         
         if hasattr(self, "title_label"):
             self.title_label.config(text=self._t("smart_budget_system"))
         if hasattr(self, "quick_menu_header"):
             self.quick_menu_header.config(text=self._t("quick_menu"))
-        if hasattr(self, "side_menu_buttons"):
-            for key, btn in self.side_menu_buttons.items():
-                btn.config(text=self._t(key))
         if hasattr(self, "logout_btn"):
             self.logout_btn.config(text=self._t("logout"))
-        if hasattr(self, "lock_btn"):
-            self.lock_btn.config(text=self._t("lock"))
         if hasattr(self, "notebook"):
             self.notebook.tab(self.dashboard_frame, text=self._t("dashboard_tab"))
             self.notebook.tab(self.transactions_frame, text=self._t("transactions_tab"))
@@ -379,20 +414,6 @@ class BudgetingApp:
             self.goal_ring_label.config(text=self._t("current_goal"))
         if hasattr(self, "goal_ring_subtitle") and not self.goal_ring_has_goal:
             self.goal_ring_subtitle.config(text=self._t("goal_ring_empty"))
-    
-    def open_settings_window(self):
-        """Open settings placeholder window"""
-        self._open_placeholder_window(
-            "Settings",
-            "Adjust system-wide preferences and integrations here. Detailed controls are coming soon."
-        )
-    
-    def open_theme_window(self):
-        """Open theme placeholder window"""
-        self._open_placeholder_window(
-            "Themes",
-            "Theme customization lets you switch colour palettes and fonts.\nTheme presets will be available shortly."
-        )
     
     def open_account_manager(self):
         """Open account management window with password update controls"""
@@ -568,85 +589,6 @@ class BudgetingApp:
                 self.account_window = None
         
         self.account_window.protocol("WM_DELETE_WINDOW", handle_close)
-    
-    def open_accessibility_center(self):
-        """Open accessibility placeholder window"""
-        self._open_placeholder_window(
-            "Accessibility",
-            "Accessibility tools such as font scaling, high-contrast themes, and narration will live here."
-        )
-    
-    def _open_placeholder_window(self, title, message):
-        """Generic placeholder window for not-yet-built areas"""
-        window = tk.Toplevel(self.root)
-        window.title(title)
-        window.geometry("360x220")
-        window.transient(self.root)
-        ttk.Label(window, text=title, font=("Helvetica", 15, "bold")).pack(pady=(15, 5))
-        ttk.Label(
-            window,
-            text=message,
-            wraplength=320,
-            justify="left"
-        ).pack(pady=10, padx=20, fill="x")
-        ttk.Button(window, text="Close", command=window.destroy).pack(pady=10)
-    
-    def open_language_window(self):
-        """Allow the user to change interface language"""
-        if self.language_window and tk.Toplevel.winfo_exists(self.language_window):
-            self.language_window.lift()
-            self.language_window.focus_force()
-            return
-        
-        languages = list(LANGUAGE_MAP.keys())
-        self.language_window = tk.Toplevel(self.root)
-        self.language_window.title("Language Preferences")
-        self.language_window.geometry("360x320")
-        self.language_window.transient(self.root)
-        
-        lang_var = tk.StringVar(value=self.current_language)
-        
-        ttk.Label(self.language_window, text="Choose Display Language", font=("Helvetica", 15, "bold")).pack(pady=15)
-        radio_frame = ttk.Frame(self.language_window, padding=10)
-        radio_frame.pack(fill="both", expand=True)
-        
-        for lang in languages:
-            ttk.Radiobutton(radio_frame, text=lang, value=lang, variable=lang_var).pack(anchor="w", pady=5)
-        
-        status_label = ttk.Label(self.language_window, text="", foreground="green")
-        status_label.pack(pady=(0, 5))
-        
-        def apply_language():
-            selected = lang_var.get()
-            current = self.system.get_preferences()
-            if not current:
-                current = (0, 0, 'light', '£', 1, DEFAULT_LANGUAGE)
-            success, message = self.system.update_preferences(
-                current[2],
-                current[3],
-                bool(current[4]),
-                selected
-            )
-            if success:
-                status_label.config(text=f"Language updated to {selected}", foreground="green")
-                self.apply_language_to_ui(selected)
-            else:
-                status_label.config(text=message, foreground="red")
-        
-        buttons = ttk.Frame(self.language_window)
-        buttons.pack(pady=10)
-        ttk.Button(buttons, text="Apply", command=apply_language).grid(row=0, column=0, padx=5)
-        ttk.Button(buttons, text="Close", command=self._close_language_window).grid(row=0, column=1, padx=5)
-        
-        def handle_close():
-            self._close_language_window()
-        self.language_window.protocol("WM_DELETE_WINDOW", handle_close)
-    
-    def _close_language_window(self):
-        """Destroy the language selector window"""
-        if self.language_window and tk.Toplevel.winfo_exists(self.language_window):
-            self.language_window.destroy()
-        self.language_window = None
     
     def create_main_interface(self):
         """Create main dashboard interface"""
@@ -4389,13 +4331,12 @@ class BudgetingApp:
         """Show preferences dialog"""
         dialog = tk.Toplevel(self.root)
         dialog.title("User Preferences")
-        dialog.geometry("400x400")
+        dialog.geometry("400x320")
         dialog.transient(self.root)
         
         prefs = self.system.get_preferences()
         if not prefs:
-            prefs = (0, 0, 'light', '£', 1, DEFAULT_LANGUAGE)
-        language_options = list(LANGUAGE_MAP.keys())
+            prefs = (0, 0, 'light', '£', 1, 'English')
         
         ttk.Label(dialog, text="User Preferences", font=("Helvetica", 14, "bold")).pack(pady=10)
         
@@ -4421,99 +4362,24 @@ class BudgetingApp:
         notif_var = tk.BooleanVar(value=bool(prefs[4]))
         ttk.Checkbutton(form_frame, variable=notif_var).grid(row=2, column=1, pady=5)
         
-        # Language
-        ttk.Label(form_frame, text="Language:").grid(row=3, column=0, sticky="w", pady=5)
-        lang_var = tk.StringVar(value=prefs[5])
-        lang_combo = ttk.Combobox(
-            form_frame,
-            values=language_options,
-            textvariable=lang_var,
-            width=25,
-            state="readonly"
-        )
-        lang_combo.grid(row=3, column=1, pady=5)
-        
         status_label = ttk.Label(form_frame, text="", foreground="red")
-        status_label.grid(row=4, column=0, columnspan=2, pady=5)
+        status_label.grid(row=3, column=0, columnspan=2, pady=5)
         
         def save():
             theme = theme_var.get()
             currency = currency_var.get()
             notif = notif_var.get()
-            language = lang_var.get()
+            language = prefs[5] if len(prefs) > 5 else "English"
             
             success, message = self.system.update_preferences(theme, currency, notif, language)
             
             if success:
                 messagebox.showinfo("Success", message)
-                self.apply_language_to_ui(language)
                 dialog.destroy()
             else:
                 status_label.config(text=message)
         
-        ttk.Button(form_frame, text="Save Preferences", command=save).grid(row=5, column=0, columnspan=2, pady=10)
-    
-    def quick_lock(self):
-        """Overlay lock screen that blocks interaction until password is re-entered"""
-        if self.locked:
-            return
-        self._hide_side_menu()
-        self.locked = True
-        self.lock_overlay = tk.Frame(self.root, bg="#0f0f0f")
-        self.lock_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.lock_overlay.lift()
-        
-        container = tk.Frame(self.lock_overlay, bg="#1f1f1f", padx=25, pady=25)
-        container.place(relx=0.5, rely=0.5, anchor="center")
-        tk.Label(
-            container,
-            text="Session Locked",
-            font=("Helvetica", 18, "bold"),
-            bg="#1f1f1f",
-            fg="white"
-        ).pack(pady=(0, 10))
-        tk.Label(
-            container,
-            text="Enter your password to resume editing.",
-            bg="#1f1f1f",
-            fg="#dddddd"
-        ).pack()
-        
-        entry = ttk.Entry(container, show="*")
-        entry.pack(pady=12, fill="x")
-        status_label = tk.Label(container, text="", bg="#1f1f1f", fg="#ff6b6b")
-        status_label.pack()
-        
-        def attempt_unlock():
-            password = entry.get().strip()
-            if not password:
-                status_label.config(text="Please enter your password.")
-                return
-            if self._verify_unlock_password(password):
-                self.unlock_interface()
-                entry.delete(0, tk.END)
-                status_label.config(text="")
-            else:
-                status_label.config(text="Incorrect password.")
-        
-        ttk.Button(container, text="Unlock", command=attempt_unlock).pack(pady=(15, 0), fill="x")
-        entry.focus_set()
-        entry.bind("<Return>", lambda event: attempt_unlock())
-    
-    def unlock_interface(self):
-        """Remove lock overlay"""
-        if not self.locked:
-            return
-        self.locked = False
-        if self.lock_overlay:
-            self.lock_overlay.destroy()
-            self.lock_overlay = None
-        if hasattr(self, "hamburger_container"):
-            self.hamburger_container.lift()
-    
-    def _verify_unlock_password(self, password):
-        """Validate password before unlocking"""
-        return self.system.verify_current_password(password)
+        ttk.Button(form_frame, text="Save Preferences", command=save).grid(row=4, column=0, columnspan=2, pady=10)
     
     def backup_data(self):
         """Backup database"""
@@ -4575,7 +4441,7 @@ class BudgetingApp:
         from gui.login_window import LoginWindow
         
         root = tk.Tk()
-        login = LoginWindow(root, BudgetingSystem())
+        LoginWindow(root, BudgetingSystem())
         root.mainloop()
     
     def _monitor_session(self):
@@ -4586,7 +4452,10 @@ class BudgetingApp:
                 if self.system.current_user_id:
                     if not self.system.is_session_valid():
                         # Session expired - force logout
-                        self.root.after(0, self._session_expired)
+                        try:
+                            self.root.after(0, self._session_expired)
+                        except tk.TclError:
+                            break
         
         thread = threading.Thread(target=check_timeout, daemon=True)
         thread.start()

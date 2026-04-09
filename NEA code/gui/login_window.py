@@ -164,12 +164,24 @@ class LoginWindow:
         """Finish login after delay."""
         if not self.root.winfo_exists():
             return
-        app_root = self.root.master if isinstance(self.root, tk.Toplevel) and self.root.master else self.root
-        self.root.destroy()
+
+        using_master_root = (
+            isinstance(self.root, tk.Toplevel)
+            and self.root.master is not None
+            and self.root.master.winfo_exists()
+        )
+        app_root = self.root.master if using_master_root else self.root
+
+        if using_master_root:
+            self.root.destroy()
+            app_root.deiconify()
+        else:
+            # Re-login path uses a Tk root directly, so reuse it safely.
+            for child in app_root.winfo_children():
+                child.destroy()
         # Launch main app - import here to avoid circular import
         from gui.budgeting_app import BudgetingApp
 
-        app_root.deiconify()
         style = ttk.Style(app_root)
         try:
             style.theme_use(self.original_theme)

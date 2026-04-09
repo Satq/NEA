@@ -6,7 +6,7 @@ It is designed for tracking spending, managing budgets, and monitoring goals in 
 ## Features
 
 - Secure account system with hashed passwords, lockout after repeated failures, and password history checks.
-- Session management with inactivity timeout and quick lock/unlock.
+- Session management with inactivity timeout and automatic logout.
 - Dashboard with budget overview, spending/income visualisations, recent activity, and goal progress ring.
 - Transaction management with add/edit/delete, tags, filters, and goal-linked contributions.
 - CSV import with flexible column mapping, alias detection, and row-level validation.
@@ -16,7 +16,7 @@ It is designed for tracking spending, managing budgets, and monitoring goals in 
 - Reports for weekly/monthly/yearly/custom periods plus period-to-period comparison.
 - Report export to PDF and CSV.
 - Database backup and restore from the GUI.
-- Preferences storage and multi-language UI support (English, French, Spanish, Hindi, Japanese).
+- Preferences storage for theme, currency, and notifications.
 
 ## Tech Stack
 
@@ -92,16 +92,10 @@ Optional field:
 
 Column names can differ because the app supports mapping and header aliases during import.
 
-## Database and Utility Script
+## Database Notes
 
 - Main database file: `smart_budgeting_system.db` (project root).
 - Backup directory used by the app: `backups/`.
-- CLI viewer script:
-
-```bash
-python view_database.py
-python view_database.py smart_budgeting_system.db users
-```
 
 ## Project Entry Points
 
