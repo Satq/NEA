@@ -3,10 +3,22 @@
 
 set -euo pipefail
 
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "This script must be run with bash."
+    echo "Install bash first, then run: bash setup.sh"
+    exit 1
+fi
+
 echo "Setting up Smart Budgeting System..."
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
+
+if ! command -v git >/dev/null 2>&1; then
+    echo "git was not found."
+    echo "Install git first, then rerun setup."
+    exit 1
+fi
 
 PYTHON_CMD=""
 if command -v python3.14 >/dev/null 2>&1; then
@@ -25,6 +37,12 @@ if sys.version_info < (3, 10):
 PY
 then
     echo "Python 3.10+ is required."
+    exit 1
+fi
+
+if ! "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
+    echo "pip is not available in $PYTHON_CMD."
+    echo "Install/enable pip first, then rerun setup."
     exit 1
 fi
 
@@ -52,7 +70,12 @@ echo "Upgrading pip..."
 python -m pip install --upgrade pip
 
 echo "Installing required packages..."
-python -m pip install -r requirements.txt
+if [ -f "requirements.txt" ]; then
+    python -m pip install -r requirements.txt
+else
+    echo "requirements.txt not found. Installing core dependencies directly..."
+    python -m pip install pandas matplotlib reportlab
+fi
 
 echo "Verifying installation..."
 if python - <<'PY'
@@ -67,7 +90,11 @@ then
     echo "Setup complete. Run the app with:"
     echo "  ./run.sh"
     echo "or"
-    echo "  source venv/bin/activate && python 'NEA code/main.py'"
+    if [ -f "main.py" ]; then
+        echo "  source venv/bin/activate && python main.py"
+    else
+        echo "  source venv/bin/activate && python 'NEA code/main.py'"
+    fi
 else
     echo "Setup failed. Please check the errors above."
     exit 1

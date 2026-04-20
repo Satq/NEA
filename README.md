@@ -29,9 +29,12 @@ It is designed for tracking spending, managing budgets, and monitoring goals in 
 
 ## Requirements
 
-- Python 3.10+ (the project is commonly run with Python 3.14).
-- Tkinter support in your Python installation.
-- `pip`.
+Install these prerequisites first (in this order):
+
+1. `git` (required to clone the repository).
+2. `bash` (required to run `setup.sh` and `run.sh`).
+3. Python 3.10+ with `pip` (the project is commonly run with Python 3.14).
+4. Tkinter support in your Python installation.
 
 On some macOS installations, Tk support may require installing Homebrew `python-tk`.
 
@@ -39,10 +42,46 @@ On some macOS installations, Tk support may require installing Homebrew `python-
 
 ### Quick Setup (Recommended)
 
+Install prerequisites first:
+
+macOS (Homebrew):
+
+```bash
+brew install git bash python
+python3 -m ensurepip --upgrade
+```
+
+Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y git bash python3-pip
+```
+
+Windows (PowerShell):
+
+```powershell
+winget install --id Git.Git -e
+winget install --id Python.Python.3 -e
+py -m ensurepip --upgrade
+```
+
+`Git for Windows` includes `bash` (Git Bash).
+
+Then run:
+
 ```bash
 git clone https://github.com/Satq/NEA.git
 cd NEA
 ./setup.sh
+```
+
+Windows alternative:
+
+```powershell
+git clone https://github.com/Satq/NEA.git
+cd NEA
+bash ./setup.sh
 ```
 
 What `setup.sh` does:
